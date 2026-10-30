@@ -62,5 +62,5 @@ def create_tts(
         if lang not in voices and models.is_installed(model_id):
             voices[lang] = PiperTTS(models.path(model_id) / "voice.onnx")
     if not voices:
-        raise ModelError(f"No voice downloaded for {provider}")
+        raise ModelError(f"Не скачан ни один голос для {provider}")
     return MultiLanguageTTS(voices, default=default_language)

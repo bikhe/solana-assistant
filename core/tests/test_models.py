@@ -155,7 +155,7 @@ def test_unknown_and_missing_models(tmp_path: Path) -> None:
     mm = manager(tmp_path, Server())
     with pytest.raises(ModelError):
         mm.spec("nope")
-    with pytest.raises(ModelError, match="not downloaded"):
+    with pytest.raises(ModelError, match="не скачана"):
         mm.require("test-model")
 
 

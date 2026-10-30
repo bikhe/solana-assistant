@@ -36,7 +36,7 @@ def default_models_dir() -> Path:
 
 
 class ModelError(Exception):
-    """A model is unknown, not installed, or failed to download."""
+    """A model is unknown, not installed, or failed to download. Messages are user-facing."""
 
 
 class HashMismatchError(ModelError):
@@ -74,7 +74,7 @@ class ModelManager:
         try:
             return self.catalog[model_id]
         except KeyError:
-            raise ModelError(f"Unknown model: {model_id}") from None
+            raise ModelError(f"Неизвестная модель: {model_id}") from None
 
     def path(self, model_id: str) -> Path:
         return self.root / self.spec(model_id).id
@@ -85,7 +85,7 @@ class ModelManager:
     def require(self, model_id: str) -> Path:
         """Folder of an installed model, or ``ModelError`` asking to download it first."""
         if not self.is_installed(model_id):
-            raise ModelError(f"Model is not downloaded: {model_id}")
+            raise ModelError(f"Модель не скачана: {model_id}")
         return self.path(model_id)
 
     def infos(self) -> list[ModelInfo]:
@@ -213,7 +213,9 @@ class ModelManager:
         actual = digest.hexdigest()
         if expected and actual != expected:
             part.unlink(missing_ok=True)
-            raise HashMismatchError(f"{file.path}: sha256 {actual} != {expected}")
+            raise HashMismatchError(
+                f"Файл {file.path} повреждён: sha256 {actual} вместо {expected}"
+            )
         part.replace(target)
         return actual
 

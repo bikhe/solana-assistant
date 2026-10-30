@@ -37,7 +37,7 @@ def create_stt(
     hw = hardware or detect_hardware()
     model_id = model_id or default_stt_model(provider, hw)
     if models.spec(model_id).engine != provider:
-        raise ModelError(f"Model {model_id} is not for {provider}")
+        raise ModelError(f"Модель {model_id} не подходит для {provider}")
     path = models.require(model_id)
 
     if provider == "faster-whisper":

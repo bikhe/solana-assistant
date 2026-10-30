@@ -274,9 +274,9 @@ def test_create_stt(tmp_path: Path, fake_faster_whisper: type[FakeWhisperModel])
     assert stt.name == "faster-whisper"
     assert create_stt("whisper.cpp", models=mm, secrets=secrets, hardware=hw).name == "whisper.cpp"
 
-    with pytest.raises(ModelError, match="not downloaded"):
+    with pytest.raises(ModelError, match="не скачана"):
         create_stt("gigaam", models=mm, secrets=secrets, hardware=hw)
-    with pytest.raises(ModelError, match="not for"):
+    with pytest.raises(ModelError, match="не подходит"):
         create_stt("gigaam", models=mm, secrets=secrets, model_id="faster-whisper-small")
     with pytest.raises(ValueError):
         create_stt("vosk", models=mm, secrets=secrets)
