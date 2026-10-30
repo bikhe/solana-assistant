@@ -12,16 +12,53 @@
   "app": {
     "windows": [
       {
+        "label": "overlay",
         "title": "Solana",
-        "width": 900,
+        "width": 560,
+        "height": 280,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "focus": false,
+        "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "chat",
+        "title": "Solana",
+        "width": 440,
         "height": 640,
-        "minWidth": 480,
-        "minHeight": 480
+        "minWidth": 360,
+        "minHeight": 420,
+        "visible": false,
+        "center": true
+      },
+      {
+        "label": "settings",
+        "title": "Solana",
+        "width": 860,
+        "height": 620,
+        "minWidth": 640,
+        "minHeight": 480,
+        "visible": false,
+        "center": true
+      },
+      {
+        "label": "wizard",
+        "title": "Solana",
+        "width": 640,
+        "height": 580,
+        "resizable": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

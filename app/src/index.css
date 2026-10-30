@@ -6,6 +6,8 @@
   --animate-pulse-fast: breathe 0.9s ease-in-out infinite;
   --animate-spin-slow: spin 3s linear infinite;
   --animate-ring: ring 1.6s ease-out infinite;
+  --animate-countdown: countdown linear forwards;
+  --animate-bar: bar 1.1s ease-in-out infinite;
 
   @keyframes breathe {
     0%,
@@ -16,6 +18,25 @@
     50% {
       transform: scale(1.06);
       opacity: 1;
+    }
+  }
+
+  @keyframes countdown {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
+
+  @keyframes bar {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
     }
   }
 
@@ -39,4 +60,14 @@ body,
 
 body {
   @apply bg-slate-950 text-slate-100 antialiased;
+}
+
+/* The overlay window is transparent: only its cards are painted. */
+html.overlay,
+html.overlay body {
+  background: transparent;
+}
+
+html.overlay {
+  overflow: hidden;
 }

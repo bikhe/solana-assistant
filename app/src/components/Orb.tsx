@@ -35,18 +35,50 @@ const looks: Record<AssistantState, { core: string; glow: string; motion: string
   error: { core: "from-red-400 via-red-500 to-red-700", glow: "bg-red-500/40", motion: "" },
 };
 
-export function Orb({ state }: { state: AssistantState }) {
+const sizes = {
+  lg: {
+    box: "size-56",
+    glow: "inset-6 blur-3xl",
+    ring: "inset-10",
+    core: "size-36",
+    shine: "inset-3",
+  },
+  md: {
+    box: "size-24",
+    glow: "inset-2 blur-2xl",
+    ring: "inset-4",
+    core: "size-14",
+    shine: "inset-1.5",
+  },
+  sm: {
+    box: "size-12",
+    glow: "inset-1 blur-lg",
+    ring: "inset-2",
+    core: "size-8",
+    shine: "inset-1",
+  },
+};
+
+export function Orb({ state, size = "lg" }: { state: AssistantState; size?: keyof typeof sizes }) {
   const look = looks[state];
+  const dims = sizes[size];
   return (
-    <div className="relative flex size-56 items-center justify-center" data-state={state}>
-      <div className={`absolute inset-6 rounded-full blur-3xl transition-colors ${look.glow}`} />
+    <div
+      className={`relative flex shrink-0 items-center justify-center ${dims.box}`}
+      data-state={state}
+    >
+      <div className={`absolute rounded-full transition-colors ${dims.glow} ${look.glow}`} />
       {state === "listening" && (
-        <div className="animate-ring absolute inset-10 rounded-full border-2 border-sky-300/60" />
+        <div
+          className={`animate-ring absolute rounded-full border-2 border-sky-300/60 ${dims.ring}`}
+        />
       )}
       <div
-        className={`relative size-36 rounded-full bg-gradient-to-br shadow-2xl transition-all duration-500 ${look.core} ${look.motion}`}
+        className={`relative rounded-full bg-gradient-to-br shadow-2xl transition-all duration-500 ${dims.core} ${look.core} ${look.motion}`}
       >
-        <div className="absolute inset-3 rounded-full bg-gradient-to-tl from-white/0 to-white/40" />
+        <div
+          className={`absolute rounded-full bg-gradient-to-tl from-white/0 to-white/40 ${dims.shine}`}
+        />
       </div>
     </div>
   );
