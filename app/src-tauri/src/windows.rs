@@ -10,6 +10,8 @@ pub const WIZARD: &str = "wizard";
 
 /// Gap between the overlay and the top edge of the screen, in logical pixels.
 const OVERLAY_TOP_GAP: f64 = 12.0;
+/// Overlay width from tauri.conf.json; used while the window is not mapped yet (Linux reports 0).
+const OVERLAY_WIDTH: f64 = 560.0;
 
 pub fn show(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
@@ -27,13 +29,15 @@ pub fn place_overlay(app: &AppHandle) {
     let Ok(Some(monitor)) = window.primary_monitor() else {
         return;
     };
-    let Ok(size) = window.outer_size() else {
-        return;
+    let scale = monitor.scale_factor();
+    let width = match window.outer_size() {
+        Ok(size) if size.width > 0 => size.width as i32,
+        _ => (OVERLAY_WIDTH * scale) as i32,
     };
     let area = monitor.size();
     let origin = monitor.position();
-    let x = origin.x + (area.width as i32 - size.width as i32) / 2;
-    let y = origin.y + (OVERLAY_TOP_GAP * monitor.scale_factor()) as i32;
+    let x = origin.x + (area.width as i32 - width) / 2;
+    let y = origin.y + (OVERLAY_TOP_GAP * scale) as i32;
     let _ = window.set_position(PhysicalPosition::new(x, y));
 }
 

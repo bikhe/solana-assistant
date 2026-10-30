@@ -1,13 +1,13 @@
 // Methods the app needs that protocol/ipc.schema.json does not have yet. They are proposed in
-// the WP4 PR; until the protocol PR lands, the core answers -32601 and the UI says so.
+// the WP4 PR (secrets.* match the WP3 proposal in PR #4); until the protocol PR lands, the core answers -32601 and the UI says so.
 // Delete this file once the methods are in the schema and use client.request directly.
 import { RpcError, type CoreClient } from "./rpc";
 
 export interface PendingMethods {
   /** Which secret keys are set (values never leave the core). */
-  "secrets.status": { params: { keys: string[] }; result: { set: Record<string, boolean> } };
+  "secrets.status": { params: { names: string[] }; result: { set: Record<string, boolean> } };
   /** Stores a secret in the OS keyring; an empty value deletes it. */
-  "secrets.set": { params: { key: string; value: string }; result: { ok: boolean } };
+  "secrets.set": { params: { name: string; value: string }; result: { ok: boolean } };
   /** Push-to-talk: start (active=true) or finish (false) listening without the wake word. */
   "voice.listen": { params: { active: boolean }; result: { ok: boolean } };
 }

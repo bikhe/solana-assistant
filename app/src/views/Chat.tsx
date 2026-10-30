@@ -98,8 +98,12 @@ export function Chat() {
     );
   }, [client]);
 
-  useEffect(() => saveHistory(items), [items]);
-  useEffect(() => listEnd.current?.scrollIntoView?.({ block: "end" }), [items, core.confirm]);
+  useEffect(() => {
+    saveHistory(items);
+  }, [items]);
+  useEffect(() => {
+    listEnd.current?.scrollIntoView?.({ block: "end" });
+  }, [items, core.confirm]);
 
   const send = (text: string) => {
     const clean = text.trim();

@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 import { setMuted, type AppContextValue } from "../lib/appContext";
 import { requestPending } from "../lib/pending";
 import {
+  inTauri,
   onTrayAction,
   registerHoldShortcut,
   showWindow,
@@ -46,7 +47,7 @@ export function useShellDuties({ client, core, settings }: AppContextValue): voi
   // First run: open the wizard once settings say it has not been completed.
   const wizardShown = useRef(false);
   useEffect(() => {
-    if (s && !s.general.first_run_done && !wizardShown.current) {
+    if (inTauri() && s && !s.general.first_run_done && !wizardShown.current) {
       wizardShown.current = true;
       showWindow("wizard").catch(() => undefined);
     }

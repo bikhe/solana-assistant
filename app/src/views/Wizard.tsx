@@ -104,7 +104,7 @@ function SetupStep() {
           <h3 className="mb-1 text-sm font-semibold">{t("wizard.keysTitle")}</h3>
           <p className="mb-2 text-xs text-slate-400">{t("wizard.keysHint")}</p>
           <div className="rounded-2xl bg-white/[0.03] px-4 ring-1 ring-white/[0.06]">
-            <KeyList only={["anthropic", "openai"]} />
+            <KeyList only={["anthropic_api_key", "openai_api_key"]} />
           </div>
         </div>
       )}

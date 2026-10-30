@@ -18,7 +18,7 @@ export function KeyList({ only }: { only?: string[] }) {
 
   useEffect(() => {
     if (!client || !connected) return;
-    requestPending(client, "secrets.status", { keys: KEY_SLOTS.map((s) => s.id) })
+    requestPending(client, "secrets.status", { names: KEY_SLOTS.map((s) => s.id) })
       .then((r) => setStatus(r.set))
       .catch((e) => isUnavailable(e) && setUnavailable(true));
   }, [client, connected]);
@@ -26,7 +26,7 @@ export function KeyList({ only }: { only?: string[] }) {
   const save = (id: string) => {
     if (!client) return;
     const value = drafts[id] ?? "";
-    requestPending(client, "secrets.set", { key: id, value })
+    requestPending(client, "secrets.set", { name: id, value })
       .then(() => {
         setStatus((s) => ({ ...s, [id]: value !== "" }));
         setDrafts((d) => ({ ...d, [id]: "" }));
@@ -75,7 +75,7 @@ export function KeyList({ only }: { only?: string[] }) {
                   disabled={unavailable}
                   onClick={() => {
                     setDrafts((d) => ({ ...d, [slot.id]: "" }));
-                    requestPending(client!, "secrets.set", { key: slot.id, value: "" })
+                    requestPending(client!, "secrets.set", { name: slot.id, value: "" })
                       .then(() => setStatus((s) => ({ ...s, [slot.id]: false })))
                       .catch(() => undefined);
                   }}

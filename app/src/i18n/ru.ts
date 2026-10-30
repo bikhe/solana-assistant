@@ -93,10 +93,10 @@ export const ru = {
   "provider.anthropic": "Anthropic",
   "provider.openai": "OpenAI",
   "provider.openrouter": "OpenRouter",
-  "provider.custom": "Свой сервер (OpenAI API)",
+  "provider.openai-compatible": "Свой сервер (OpenAI API)",
   "provider.ollama": "Ollama",
-  "provider.llama.cpp": "llama.cpp",
-  "provider.lm-studio": "LM Studio",
+  "provider.llamacpp": "llama.cpp",
+  "provider.lmstudio": "LM Studio",
 
   "mode.local": "Локально",
   "mode.localHint": "Всё на вашем ПК, без интернета. Нужна модель на 5–8 ГБ.",

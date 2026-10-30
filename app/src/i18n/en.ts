@@ -94,10 +94,10 @@ export const en: Messages = {
   "provider.anthropic": "Anthropic",
   "provider.openai": "OpenAI",
   "provider.openrouter": "OpenRouter",
-  "provider.custom": "Own server (OpenAI API)",
+  "provider.openai-compatible": "Own server (OpenAI API)",
   "provider.ollama": "Ollama",
-  "provider.llama.cpp": "llama.cpp",
-  "provider.lm-studio": "LM Studio",
+  "provider.llamacpp": "llama.cpp",
+  "provider.lmstudio": "LM Studio",
 
   "mode.local": "Local",
   "mode.localHint": "Everything on your PC, offline. Needs a 5–8 GB model.",

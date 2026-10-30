@@ -17,7 +17,7 @@ const screens: Record<View, React.ComponentType> = {
   wizard: Wizard,
 };
 
-/** Browser-only switcher between the windows, for pnpm dev and screenshots. */
+/** Browser-only switcher between the windows (add &dev to the URL). */
 function DevNav({ view }: { view: View }) {
   return (
     <nav className="fixed right-2 bottom-2 z-50 flex gap-1 rounded-full bg-black/60 p-1 text-[11px] opacity-30 ring-1 ring-white/10 transition hover:opacity-100">
@@ -42,6 +42,8 @@ export function App({ client: given, view: forced }: { client?: CoreClient; view
   const lang = settings.settings?.general.language ?? "ru";
   const view = forced ?? currentView();
   const Screen = screens[view];
+  const showDevNav =
+    !inTauri() && !forced && new URLSearchParams(window.location.search).has("dev");
 
   useEffect(() => {
     const titles = {
@@ -59,7 +61,7 @@ export function App({ client: given, view: forced }: { client?: CoreClient; view
     <LanguageContext.Provider value={lang}>
       <AppContext.Provider value={{ client, core, dispatch, settings, noCore }}>
         <Screen />
-        {!inTauri() && !forced && <DevNav view={view} />}
+        {showDevNav && <DevNav view={view} />}
       </AppContext.Provider>
     </LanguageContext.Provider>
   );

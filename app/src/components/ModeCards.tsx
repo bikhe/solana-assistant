@@ -28,7 +28,7 @@ export function ModeCards({
             role="radio"
             aria-checked={selected}
             onClick={() => onChange(id)}
-            className={`rounded-2xl p-4 text-left transition ${
+            className={`flex flex-col rounded-2xl p-4 text-left transition ${
               selected
                 ? "bg-gradient-to-br from-amber-300/20 to-orange-500/10 ring-2 ring-amber-400/70"
                 : "bg-white/[0.03] ring-1 ring-white/10 hover:bg-white/[0.06]"
