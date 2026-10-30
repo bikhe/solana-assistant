@@ -92,6 +92,11 @@ pub fn spawn(app: &AppHandle) -> std::io::Result<()> {
 
 pub fn kill(app: &AppHandle) {
     if let Some(mut child) = app.state::<CoreState>().child.lock().unwrap().take() {
+        // `uv run` on Windows does not pass the kill on to the Python child: kill the tree.
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/pid", &child.id().to_string(), "/t", "/f"])
+            .status();
         let _ = child.kill();
         let _ = child.wait();
     }
