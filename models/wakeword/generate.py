@@ -184,7 +184,12 @@ def main(argv: list[str] | None = None) -> None:
         embed_all(
             extractor, stream(own_neg, len(own_neg) * args.extra_repeats, None), 0, data, None
         )
-    embed_all(extractor, background_crops(rng, background, args.background_clips), 0, data, None)
+    # Synthetic phrases glued into one long stream: windows across phrase boundaries look
+    # like real conversation, which isolated clips never show the model.
+    gaps = [np.zeros(int(rng.uniform(0.1, 0.8) * SAMPLE_RATE), dtype=np.int16) for _ in neg_base]
+    stream_pcm = np.concatenate([p for pair in zip(neg_base, gaps, strict=True) for p in pair])
+    sources = [*background, to_float(stream_pcm)]
+    embed_all(extractor, background_crops(rng, sources, args.background_clips), 0, data, None)
     # Pure noise and near-silence: the model must not fire on an empty room.
     silence = [np.zeros(SAMPLE_RATE // 2, dtype=np.int16)]
     embed_all(extractor, stream(silence, args.negatives // 10, None), 0, data, None)
