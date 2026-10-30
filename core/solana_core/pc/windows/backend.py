@@ -196,6 +196,8 @@ class WindowsPcBackend(CommonPcBackend):
         if session is None:
             return None
         props = await session.try_get_media_properties_async()
+        if props is None:
+            return None
         playback = session.get_playback_info()
         app = session.source_app_user_model_id.split("!")[0].removesuffix(".exe")
         return MediaInfo(
