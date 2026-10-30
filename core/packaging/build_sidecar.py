@@ -75,7 +75,8 @@ def build(triple: str) -> Path:
         "--specpath",
         str(BUILD),
     ]
-    subprocess.run(cmd, check=True, cwd=CORE)
+    # Fixed argv without a shell; nothing comes from outside the repo.
+    subprocess.run(cmd, check=True, cwd=CORE)  # nosemgrep
     BINARIES.mkdir(parents=True, exist_ok=True)
     target = BINARIES / f"{NAME}-{triple}{EXE}"
     shutil.copy2(BUILD / "dist" / f"{NAME}{EXE}", target)
@@ -94,7 +95,7 @@ async def _ping(port: int, token: str) -> dict[str, object]:
 def smoke(binary: Path, timeout: float = 120.0) -> None:
     """Start the binary in fake mode, wait for the ready line and ping it over WebSocket."""
     started = time.monotonic()
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # nosemgrep: argv list of our own build output, no shell
         [str(binary), "--fake", "--port", "0", "--token", "smoke"],
         stdout=subprocess.PIPE,
         text=True,
