@@ -7,6 +7,7 @@ sample data in --fake mode, so the app can be built against them already.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Coroutine
 from typing import Any
@@ -14,9 +15,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from solana_core import __version__
-from solana_core.brain.base import Message, TextDelta
+from solana_core.brain.base import TextDelta
+from solana_core.brain.dialog import ToolFinished, ToolStarted, TurnDone
 from solana_core.fake.catalog import FakeCatalog
-from solana_core.protocol import PROTOCOL_VERSION
+from solana_core.protocol import PROTOCOL_VERSION, Language
 from solana_core.protocol.generated import (
     AssistantDeltaEvent,
     AssistantDoneEvent,
@@ -25,6 +27,7 @@ from solana_core.protocol.generated import (
     ConfirmReplyParams,
     DownloadProgressEvent,
     EmptyParams,
+    ErrorEvent,
     McpAddParams,
     McpListResult,
     McpNameParams,
@@ -44,9 +47,11 @@ from solana_core.protocol.generated import (
     SkillsListResult,
     SkillsSetEnabledParams,
     StateEvent,
+    ToolFinishedEvent,
     ToolInfo,
     ToolsListResult,
     ToolsSetEnabledParams,
+    ToolStartedEvent,
     VoiceMuteParams,
 )
 from solana_core.server.core import Core
@@ -58,6 +63,8 @@ from solana_core.server.rpc import (
     RpcError,
     not_implemented,
 )
+
+log = logging.getLogger(__name__)
 
 
 def build_dispatcher(core: Core) -> Dispatcher:
@@ -90,11 +97,12 @@ def build_dispatcher(core: Core) -> Dispatcher:
     @rpc.method("settings.set")
     async def settings_set(params: SettingsSetParams) -> SettingsResult:
         try:
-            core.config.update(params.patch.model_dump())
+            settings = core.config.update(params.patch.model_dump())
         except ValidationError as exc:
             raise RpcError(
                 INVALID_PARAMS, "Invalid settings", exc.errors(include_url=False)
             ) from exc
+        core.tools.set_disabled(settings.tools.disabled)
         return settings_result()
 
     @rpc.method("voice.mute")
@@ -110,7 +118,8 @@ def build_dispatcher(core: Core) -> Dispatcher:
         if core.llm is None:
             raise not_implemented("chat")
         turn_id = uuid.uuid4().hex
-        spawn(_chat_turn(core, turn_id, params.text))
+        language = params.language or core.config.settings.general.language
+        spawn(_chat_turn(core, turn_id, params.text, language))
         return ChatSendResult(turn_id=turn_id)
 
     @rpc.method("confirm.reply")
@@ -127,6 +136,7 @@ def build_dispatcher(core: Core) -> Dispatcher:
             core.tools.set_enabled(params.name, params.enabled)
         except KeyError as exc:
             raise RpcError(NOT_FOUND, f"Unknown tool: {params.name}") from exc
+        core.config.update({"tools": {"disabled": core.tools.disabled_names()}})
         return core.tools.info(params.name)
 
     # MCP (WP7)
@@ -219,23 +229,65 @@ def build_dispatcher(core: Core) -> Dispatcher:
     return rpc
 
 
-async def _chat_turn(core: Core, turn_id: str, text: str) -> None:
-    """Minimal text turn over ``core.llm``. WP3 replaces it with the real dialog loop."""
-    assert core.llm is not None
+async def _chat_turn(core: Core, turn_id: str, text: str, language: Language) -> None:
+    """Run one text turn through ``core.dialog`` and forward its events to the app."""
+    dialog = core.dialog
+    assert dialog is not None
     async with core.turn_lock:
         core.set_state("thinking", "chat")
-        answer = ""
-        async for event in core.llm.stream([Message("user", text)], core.tools.specs()):
-            if isinstance(event, TextDelta):
-                if core.state != "speaking":
-                    core.set_state("speaking")
-                answer += event.text
+        answer, done = "", False
+        try:
+            async for event in dialog.turn(text, language=language, turn_id=turn_id):
+                if isinstance(event, TextDelta):
+                    if core.state != "speaking":
+                        core.set_state("speaking")
+                    answer += event.text
+                    core.bus.emit(
+                        "assistant.delta", AssistantDeltaEvent(turn_id=turn_id, text=event.text)
+                    )
+                elif isinstance(event, ToolStarted):
+                    core.bus.emit(
+                        "tool.started",
+                        ToolStartedEvent(
+                            call_id=event.call.id,
+                            turn_id=turn_id,
+                            tool=event.call.name,
+                            arguments=dict(event.call.arguments),
+                        ),
+                    )
+                elif isinstance(event, ToolFinished):
+                    result = event.result
+                    core.bus.emit(
+                        "tool.finished",
+                        ToolFinishedEvent(
+                            call_id=event.call.id,
+                            tool=event.call.name,
+                            ok=result.ok,
+                            summary=result.content[:200] if result.ok else None,
+                            error=None if result.ok else result.content[:200],
+                        ),
+                    )
+                elif isinstance(event, TurnDone):
+                    if event.error_code:
+                        core.bus.emit(
+                            "error",
+                            ErrorEvent(code=event.error_code, message=event.text, recoverable=True),
+                        )
+                    core.bus.emit(
+                        "assistant.done", AssistantDoneEvent(turn_id=turn_id, text=event.text)
+                    )
+                    done = True
+        except Exception:
+            log.exception("chat turn failed")
+        finally:
+            # Whatever happened (crash, cancel), the app must not wait forever.
+            if not done:
                 core.bus.emit(
-                    "assistant.delta", AssistantDeltaEvent(turn_id=turn_id, text=event.text)
+                    "assistant.done",
+                    AssistantDoneEvent(turn_id=turn_id, text=answer, interrupted=True),
                 )
-        core.bus.emit("assistant.done", AssistantDoneEvent(turn_id=turn_id, text=answer))
-        if not core.muted:
-            core.set_state("idle")
+            if not core.muted:
+                core.set_state("idle")
 
 
 async def _fake_download(core: Core, catalog: FakeCatalog, download_id: str, model_id: str) -> None:

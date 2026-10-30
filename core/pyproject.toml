@@ -6,6 +6,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28",
     "keyring>=25.6",
     "platformdirs>=4.3",
     "pydantic>=2.11",
@@ -39,6 +40,8 @@ extend-exclude = ["solana_core/protocol/generated.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "SIM", "RUF"]
+# Russian text is everywhere; Cyrillic letters that look Latin are not a mistake here.
+ignore = ["RUF001"]
 
 [tool.mypy]
 strict = true
