@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import shutil
 import time
@@ -162,14 +163,45 @@ def search_files_sync(
 
 
 def move_path_sync(src: Path, dst: Path) -> None:
-    """Move without ever overwriting: an existing target is an error."""
+    """Move without ever overwriting: an existing target is an error, even in a race."""
     if not src.exists():
         raise FileNotFoundError(src)
     if dst.is_dir():
         dst = dst / src.name
     if dst.exists():
         raise FileExistsError(dst)
-    shutil.move(src, dst)
+    if os.name == "nt" or src.is_dir():
+        try:
+            os.rename(src, dst)  # Windows refuses to replace; POSIX only replaces empty dirs
+            return
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=False)
+            shutil.rmtree(src)
+        else:
+            _copy_exclusive(src, dst)
+            os.unlink(src)
+        return
+    try:
+        os.link(src, dst)  # fails if dst appeared meanwhile
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            raise FileExistsError(dst) from e
+        _copy_exclusive(src, dst)  # other volume, or links unsupported
+    os.unlink(src)
+
+
+def _copy_exclusive(src: Path, dst: Path) -> None:
+    with open(src, "rb") as fin, open(dst, "xb") as fout:  # "x" never replaces a file
+        try:
+            shutil.copyfileobj(fin, fout)
+        except BaseException:
+            fout.close()
+            dst.unlink(missing_ok=True)  # no half-copied duplicate
+            raise
+    shutil.copystat(src, dst)
 
 
 def trash_path_sync(path: Path) -> None:

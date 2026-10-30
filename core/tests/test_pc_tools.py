@@ -228,3 +228,18 @@ async def test_screenshot_is_saved(tmp_path: Path) -> None:
     saved = Path(result.data["path"])
     assert saved.parent == tmp_path / "shots"
     assert saved.read_bytes() == pc.png  # noqa: ASYNC240
+
+
+async def test_volume_changes_do_not_overlap() -> None:
+    import asyncio
+
+    class SlowPc(RichFakePc):
+        async def get_volume(self) -> int:
+            level = self.volume
+            await asyncio.sleep(0.01)  # another call would read the same level here
+            return level
+
+    pc = SlowPc()
+    pc.volume = 50
+    await asyncio.gather(*(call(pc, "pc.volume_change", delta=10) for _ in range(3)))
+    assert pc.volume == 80

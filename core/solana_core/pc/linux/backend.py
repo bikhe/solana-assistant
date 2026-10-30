@@ -139,6 +139,9 @@ class LinuxPcBackend(CommonPcBackend):
 
     def capabilities(self) -> Capabilities:
         caps = Capabilities(set(COMMON_CAPABILITIES) | {"list_apps", "open_app", "close_app"})
+        if self.wayland and not self._which("grim"):
+            caps.supported.discard("screenshot")
+            caps.notes["screenshot"] = "в Wayland нужен grim"
         notes = caps.notes
 
         def need(ops: Iterable[str], ok: bool, note: str) -> None:
@@ -164,17 +167,17 @@ class LinuxPcBackend(CommonPcBackend):
             self._which("playerctl") or self._which("gdbus"),
             "установите playerctl",
         )
-        need(["now_playing"], self._which("playerctl"), "установите playerctl")
+        need(
+            ["now_playing"],
+            self._which("playerctl") or self._which("gdbus"),
+            "установите playerctl",
+        )
         opener = self._which("xdg-open")
         need(["open_path", "reveal_path", "open_url"], opener, "установите xdg-utils")
-        clip = (
-            self._which("wl-copy") if self.wayland else self._which("xclip") or self._which("xsel")
-        )
-        need(
-            ["get_clipboard", "set_clipboard"],
-            clip,
-            "установите wl-clipboard" if self.wayland else "установите xclip",
-        )
+        x_clip = self._which("xclip") or self._which("xsel")
+        clip_note = "установите wl-clipboard" if self.wayland else "установите xclip"
+        need(["get_clipboard"], (self.wayland and self._which("wl-paste")) or x_clip, clip_note)
+        need(["set_clipboard"], (self.wayland and self._which("wl-copy")) or x_clip, clip_note)
         need(["notify"], self._which("notify-send") or self._which("gdbus"), "установите libnotify")
         need(["lock_screen", "sleep", "shutdown"], self._which("systemctl"), "нужен systemd")
         return caps
@@ -226,9 +229,7 @@ class LinuxPcBackend(CommonPcBackend):
             argv = argv[1:]
         if not argv:
             raise ToolError(f"Не нашла приложение «{app_id}»")
-        # Flatpak apps run as "flatpak run <id>"; match the id in the command line instead.
-        needle = argv[-1] if Path(argv[0]).name == "flatpak" else Path(argv[0]).name
-        stopped = await asyncio.to_thread(_terminate_matching, needle)
+        stopped = await asyncio.to_thread(_terminate_matching, close_target(argv))
         if not stopped:
             raise ToolError(f"Приложение «{app_id}» не запущено")
 
@@ -271,33 +272,44 @@ class LinuxPcBackend(CommonPcBackend):
 
     # Sound and media
 
-    async def get_volume(self) -> int:
+    async def _sound(self, wpctl: list[str], pactl: list[str], operation: str) -> str:
+        """Run through PipeWire, falling back to PulseAudio when wpctl can't reach a sink."""
+        error: CommandError | None = None
         if self._which("wpctl"):
-            out = await self.run_ok("wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@")
-            return parse_wpctl_volume(out)[0]
+            try:
+                return await self.run_ok("wpctl", *wpctl)
+            except CommandError as e:
+                error = e
         if self._which("pactl"):
-            return parse_pactl_volume(
-                await self.run_ok("pactl", "get-sink-volume", "@DEFAULT_SINK@")
-            )
-        raise NotSupportedError("get_volume", "нужен PipeWire (wpctl) или PulseAudio (pactl)")
+            return await self.run_ok("pactl", *pactl)
+        if error is not None:
+            raise error
+        raise NotSupportedError(operation, "нужен PipeWire (wpctl) или PulseAudio (pactl)")
+
+    async def get_volume(self) -> int:
+        out = await self._sound(
+            ["get-volume", "@DEFAULT_AUDIO_SINK@"],
+            ["get-sink-volume", "@DEFAULT_SINK@"],
+            "get_volume",
+        )
+        # pactl prints percents, wpctl a 0..1 fraction
+        return parse_pactl_volume(out) if "%" in out else parse_wpctl_volume(out)[0]
 
     async def set_volume(self, percent: int) -> None:
         percent = max(0, min(100, percent))
-        if self._which("wpctl"):
-            await self.run_ok("wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{percent / 100:.2f}")
-        elif self._which("pactl"):
-            await self.run_ok("pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%")
-        else:
-            raise NotSupportedError("set_volume", "нужен PipeWire (wpctl) или PulseAudio (pactl)")
+        await self._sound(
+            ["set-volume", "@DEFAULT_AUDIO_SINK@", f"{percent / 100:.2f}"],
+            ["set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"],
+            "set_volume",
+        )
 
     async def set_muted(self, muted: bool) -> None:
         flag = "1" if muted else "0"
-        if self._which("wpctl"):
-            await self.run_ok("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", flag)
-        elif self._which("pactl"):
-            await self.run_ok("pactl", "set-sink-mute", "@DEFAULT_SINK@", flag)
-        else:
-            raise NotSupportedError("set_muted", "нужен PipeWire (wpctl) или PulseAudio (pactl)")
+        await self._sound(
+            ["set-mute", "@DEFAULT_AUDIO_SINK@", flag],
+            ["set-sink-mute", "@DEFAULT_SINK@", flag],
+            "set_muted",
+        )
 
     async def _media(self, playerctl_cmd: str, mpris_method: str) -> None:
         if self._which("playerctl"):
@@ -307,19 +319,22 @@ class LinuxPcBackend(CommonPcBackend):
             return
         if not self._which("gdbus"):
             raise NotSupportedError(playerctl_cmd, "установите playerctl")
-        names = parse_mpris_names(
-            await self.run_ok(
-                "gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
-                "--object-path", "/org/freedesktop/DBus",
-                "--method", "org.freedesktop.DBus.ListNames",
-            )
-        )  # fmt: skip
+        names = await self._mpris_players()
         if not names:
             raise ToolError("Сейчас ничего не играет")
         await self.run_ok(
             "gdbus", "call", "--session", "--dest", names[0],
             "--object-path", "/org/mpris/MediaPlayer2",
             "--method", f"org.mpris.MediaPlayer2.Player.{mpris_method}",
+        )  # fmt: skip
+
+    async def _mpris_players(self) -> list[str]:
+        return parse_mpris_names(
+            await self.run_ok(
+                "gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
+                "--object-path", "/org/freedesktop/DBus",
+                "--method", "org.freedesktop.DBus.ListNames",
+            )
         )  # fmt: skip
 
     async def media_play_pause(self) -> None:
@@ -333,13 +348,29 @@ class LinuxPcBackend(CommonPcBackend):
 
     async def now_playing(self) -> MediaInfo | None:
         if not self._which("playerctl"):
-            raise NotSupportedError("now_playing", "установите playerctl")
+            return await self._now_playing_dbus()
         fmt = "{{status}}\t{{title}}\t{{artist}}\t{{playerName}}"
         result = await self.run("playerctl", "metadata", "--format", fmt)
         if not result.ok or not result.stdout.strip():
             return None
         status, title, artist, player = (result.stdout.rstrip("\n").split("\t") + [""] * 4)[:4]
         return MediaInfo(status == "Playing", title or None, artist or None, player or None)
+
+    async def _now_playing_dbus(self) -> MediaInfo | None:
+        """Playback state only (no track): enough to make "play" and "pause" idempotent."""
+        if not self._which("gdbus"):
+            raise NotSupportedError("now_playing", "установите playerctl")
+        names = await self._mpris_players()
+        if not names:
+            return None
+        out = await self.run_ok(
+            "gdbus", "call", "--session", "--dest", names[0],
+            "--object-path", "/org/mpris/MediaPlayer2",
+            "--method", "org.freedesktop.DBus.Properties.Get",
+            "org.mpris.MediaPlayer2.Player", "PlaybackStatus",
+        )  # fmt: skip
+        app = names[0].removeprefix("org.mpris.MediaPlayer2.").split(".")[0]
+        return MediaInfo(playing="'Playing'" in out, app=app)
 
     # Files and browser
 
@@ -440,20 +471,42 @@ async def spawn_input(argv: list[str], text: str) -> None:
         await asyncio.wait_for(proc.wait(), 0.5)
 
 
-def _terminate_matching(needle: str) -> int:
+# Programs that run other programs: their name says nothing about which app it is.
+LAUNCHERS = {
+    "sh", "bash", "dash", "zsh", "env", "python", "python3", "perl", "ruby", "node", "java",
+    "electron", "mono", "wine", "gjs", "flatpak", "snap", "uv", "uvx", "npx",
+}  # fmt: skip
+
+
+def close_target(argv: list[str]) -> tuple[str, bool]:
+    """(needle, by_argument): match the binary by name, or an argument for launched apps."""
+    name = Path(argv[0]).name
+    if name not in LAUNCHERS and not re.fullmatch(r"python3(\.\d+)?", name):
+        return name, False
+    args = [a for a in argv[1:] if not a.startswith("-") and a not in ("run", "-c")]
+    if not args:
+        raise ToolError("Не могу понять, какой процесс закрыть")
+    return args[-1] if name == "flatpak" else args[0], True
+
+
+def _terminate_matching(target: tuple[str, bool]) -> int:
+    """SIGTERM this user's processes of the app; never other users' or unrelated ones."""
     import psutil
 
-    me = os.getpid()
+    needle, by_argument = target
+    me, user = os.getpid(), os.getuid() if hasattr(os, "getuid") else None
     count = 0
-    for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
+    for proc in psutil.process_iter(["pid", "name", "exe", "cmdline", "uids"]):
         info = proc.info
-        if info["pid"] == me:
+        if info["pid"] == me or (user is not None and info["uids"] and info["uids"].real != user):
             continue
-        exe = Path(info["exe"] or "").name
         cmdline = info["cmdline"] or []
-        if needle in (info["name"], exe, *(Path(c).name for c in cmdline[:1])) or (
-            "." in needle and needle in cmdline
-        ):
+        if by_argument:
+            match = needle in cmdline[1:]
+        else:
+            exe = Path(info["exe"] or "").name
+            match = needle in (exe, Path(cmdline[0]).name if cmdline else "")
+        if match:
             with contextlib.suppress(psutil.Error):
                 proc.terminate()
                 count += 1

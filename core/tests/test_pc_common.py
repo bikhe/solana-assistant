@@ -52,3 +52,24 @@ async def test_run_command() -> None:
     assert result.ok and result.stdout.strip() == "ПРИВЕТ"
     with pytest.raises(CommandError):
         await run_command(["solana-no-such-program"])
+
+
+def test_move_does_not_replace_a_file_created_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "a.txt"
+    src.write_text("mine", encoding="utf-8")
+    dst = tmp_path / "b.txt"
+    real_exists = Path.exists
+
+    def racing_exists(self: Path, **kwargs: bool) -> bool:
+        if self == dst and not real_exists(self):
+            dst.write_text("theirs", encoding="utf-8")  # appears right after our check
+            return False
+        return real_exists(self, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", racing_exists)
+    with pytest.raises(FileExistsError):
+        move_path_sync(src, dst)
+    assert dst.read_text(encoding="utf-8") == "theirs"
+    assert src.read_text(encoding="utf-8") == "mine"

@@ -238,7 +238,9 @@ class MacPcBackend(CommonPcBackend):
         if result.ok:
             paths = [Path(line) for line in result.stdout.splitlines() if line]
             visible = [p for p in paths if not any(part.startswith(".") for part in p.parts)]
-            return [FileHit(p, p.is_dir()) for p in visible[:limit]]
+            if visible:
+                return [FileHit(p, p.is_dir()) for p in visible[:limit]]
+        # Spotlight may be off or still indexing: walk the folders ourselves.
         return await asyncio.to_thread(search_files_sync, query, limit)
 
     async def open_path(self, path: Path) -> None:

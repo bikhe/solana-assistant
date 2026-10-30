@@ -8,6 +8,7 @@ from solana_core.pc.base import NotSupportedError
 from solana_core.pc.common import CommandResult
 from solana_core.pc.linux.backend import (
     LinuxPcBackend,
+    close_target,
     exec_argv,
     parse_desktop_entry,
     parse_mpris_names,
@@ -197,3 +198,46 @@ async def test_capabilities_with_nothing_installed() -> None:
     assert {"list_apps", "search_files", "trash_path"} <= caps.supported
     assert "get_volume" not in caps.supported
     assert "wpctl" in caps.notes["get_volume"]
+
+
+def test_close_target_never_matches_launchers_by_name() -> None:
+    assert close_target(["firefox"]) == ("firefox", False)
+    assert close_target(["/usr/bin/python3", "/opt/app/main.py"]) == ("/opt/app/main.py", True)
+    assert close_target(["flatpak", "run", "--branch=stable", "org.telegram.desktop"]) == (
+        "org.telegram.desktop",
+        True,
+    )
+    with pytest.raises(ToolError):
+        close_target(["sh"])
+
+
+async def test_volume_falls_back_when_wpctl_fails() -> None:
+    runner = FakeRunner(
+        {
+            "wpctl": CommandResult(1, "", "Could not connect to PipeWire"),
+            "pactl get-sink-volume": "Volume: front-left: 1 /  25% / 0 dB",
+        }
+    )
+    pc = backend(runner, has={"wpctl", "pactl"})
+    assert await pc.get_volume() == 25
+    await pc.set_muted(False)
+    assert ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"] in runner.argvs
+
+
+async def test_now_playing_state_over_dbus() -> None:
+    runner = FakeRunner(
+        {
+            "gdbus call --session --dest org.freedesktop.DBus ": (
+                "(['org.mpris.MediaPlayer2.vlc'],)"
+            ),
+            "gdbus call --session --dest org.mpris.MediaPlayer2.vlc": "(<'Playing'>,)",
+        }
+    )
+    info = await backend(runner, has={"gdbus"}).now_playing()
+    assert info is not None and info.playing and info.app == "vlc"
+
+
+def test_wayland_capabilities_follow_installed_helpers() -> None:
+    caps = backend(FakeRunner(), env=WAYLAND, has={"wl-copy"}).capabilities()
+    assert "set_clipboard" in caps.supported and "get_clipboard" not in caps.supported
+    assert "screenshot" not in caps.supported and "grim" in caps.notes["screenshot"]

@@ -11,6 +11,7 @@ import contextlib
 import difflib
 import logging
 import re
+import weakref
 from abc import abstractmethod
 from collections.abc import Sequence
 from datetime import datetime
@@ -140,6 +141,17 @@ def find_window(windows: Sequence[WindowInfo], spoken: str) -> WindowInfo | None
 
 
 # Base class
+
+
+_SOUND_LOCKS: weakref.WeakKeyDictionary[PcBackend, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+def sound_lock(pc: PcBackend) -> asyncio.Lock:
+    """One lock per backend so overlapping volume and mute calls don't undo each other."""
+    lock = _SOUND_LOCKS.get(pc)
+    if lock is None:
+        lock = _SOUND_LOCKS[pc] = asyncio.Lock()
+    return lock
 
 
 class PcTool(Tool):
@@ -349,9 +361,10 @@ class VolumeSet(PcTool):
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         level = max(0, min(100, _int(args, "level")))
-        await self.pc.set_volume(level)
-        if level > 0:
-            await _unmute(self.pc)
+        async with sound_lock(self.pc):
+            await self.pc.set_volume(level)
+            if level > 0:
+                await _unmute(self.pc)
         return ToolResult(f"Громкость {level}%", data={"level": level})
 
 
@@ -364,10 +377,11 @@ class VolumeChange(PcTool):
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         delta = _int(args, "delta")
-        level = max(0, min(100, await self.pc.get_volume() + delta))
-        await self.pc.set_volume(level)
-        if delta > 0:
-            await _unmute(self.pc)
+        async with sound_lock(self.pc):
+            level = max(0, min(100, await self.pc.get_volume() + delta))
+            await self.pc.set_volume(level)
+            if delta > 0:
+                await _unmute(self.pc)
         return ToolResult(f"Громкость {level}%", data={"level": level})
 
 
@@ -383,7 +397,8 @@ class Mute(PcTool):
 
     async def call(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         muted = bool(args.get("muted", True))
-        await self.pc.set_muted(muted)
+        async with sound_lock(self.pc):
+            await self.pc.set_muted(muted)
         return ToolResult("Звук выключен" if muted else "Звук включён")
 
 
