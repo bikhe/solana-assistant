@@ -160,7 +160,7 @@ class FakeSoundDevice:
         index = self.default.device[0] if index is None else index
         return {**devices[index], "default_samplerate": self.native_rate or SAMPLE_RATE}
 
-    def InputStream(self, **kwargs: Any) -> FakeStream:  # noqa: N802 - mirrors the real API
+    def InputStream(self, **kwargs: Any) -> FakeStream:
         if self.native_rate and kwargs["samplerate"] != self.native_rate:
             raise self.PortAudioError("Invalid sample rate")
         stream = FakeStream(kwargs)
