@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Tauri
+node_modules/
+dist/
+target/
+
+# Models are downloaded, never committed
+models/**/*.onnx
+models/**/*.tflite
+models/**/*.bin
+models/**/*.gguf
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Tauri generated schemas
+app/src-tauri/gen/

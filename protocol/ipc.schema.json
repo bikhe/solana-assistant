@@ -1,0 +1,613 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bikhe/solana-assistant/protocol/ipc.schema.json",
+  "title": "IpcProtocol",
+  "description": "Solana IPC: JSON-RPC 2.0 over WebSocket between solana-app and solana-core. RequestMap lists app -> core requests (params and result of each method). EventMap lists core -> app notifications (params of each event). Field names on the wire are snake_case. This file is the single source of truth: TS types and pydantic models are generated from it.",
+  "type": "object",
+  "properties": {
+    "protocol_version": { "const": 1 },
+    "requests": { "$ref": "#/$defs/RequestMap" },
+    "events": { "$ref": "#/$defs/EventMap" }
+  },
+  "required": ["protocol_version", "requests", "events"],
+  "additionalProperties": false,
+  "$defs": {
+    "RequestMap": {
+      "type": "object",
+      "description": "Every request method the core accepts.",
+      "properties": {
+        "ping": { "$ref": "#/$defs/PingRequest" },
+        "state.get": { "$ref": "#/$defs/StateGetRequest" },
+        "settings.get": { "$ref": "#/$defs/SettingsGetRequest" },
+        "settings.set": { "$ref": "#/$defs/SettingsSetRequest" },
+        "chat.send": { "$ref": "#/$defs/ChatSendRequest" },
+        "voice.mute": { "$ref": "#/$defs/VoiceMuteRequest" },
+        "confirm.reply": { "$ref": "#/$defs/ConfirmReplyRequest" },
+        "tools.list": { "$ref": "#/$defs/ToolsListRequest" },
+        "tools.set_enabled": { "$ref": "#/$defs/ToolsSetEnabledRequest" },
+        "mcp.list": { "$ref": "#/$defs/McpListRequest" },
+        "mcp.add": { "$ref": "#/$defs/McpAddRequest" },
+        "mcp.remove": { "$ref": "#/$defs/McpRemoveRequest" },
+        "mcp.set_enabled": { "$ref": "#/$defs/McpSetEnabledRequest" },
+        "skills.list": { "$ref": "#/$defs/SkillsListRequest" },
+        "skills.install": { "$ref": "#/$defs/SkillsInstallRequest" },
+        "skills.remove": { "$ref": "#/$defs/SkillsRemoveRequest" },
+        "skills.set_enabled": { "$ref": "#/$defs/SkillsSetEnabledRequest" },
+        "models.list": { "$ref": "#/$defs/ModelsListRequest" },
+        "models.download": { "$ref": "#/$defs/ModelsDownloadRequest" }
+      },
+      "required": [
+        "ping",
+        "state.get",
+        "settings.get",
+        "settings.set",
+        "chat.send",
+        "voice.mute",
+        "confirm.reply",
+        "tools.list",
+        "tools.set_enabled",
+        "mcp.list",
+        "mcp.add",
+        "mcp.remove",
+        "mcp.set_enabled",
+        "skills.list",
+        "skills.install",
+        "skills.remove",
+        "skills.set_enabled",
+        "models.list",
+        "models.download"
+      ],
+      "additionalProperties": false
+    },
+    "EventMap": {
+      "type": "object",
+      "description": "Every notification the core sends to the app.",
+      "properties": {
+        "state": { "$ref": "#/$defs/StateEvent" },
+        "transcript.partial": { "$ref": "#/$defs/TranscriptEvent" },
+        "transcript.final": { "$ref": "#/$defs/TranscriptEvent" },
+        "assistant.delta": { "$ref": "#/$defs/AssistantDeltaEvent" },
+        "assistant.done": { "$ref": "#/$defs/AssistantDoneEvent" },
+        "tool.started": { "$ref": "#/$defs/ToolStartedEvent" },
+        "tool.finished": { "$ref": "#/$defs/ToolFinishedEvent" },
+        "confirm.request": { "$ref": "#/$defs/ConfirmRequestEvent" },
+        "download.progress": { "$ref": "#/$defs/DownloadProgressEvent" },
+        "error": { "$ref": "#/$defs/ErrorEvent" }
+      },
+      "required": [
+        "state",
+        "transcript.partial",
+        "transcript.final",
+        "assistant.delta",
+        "assistant.done",
+        "tool.started",
+        "tool.finished",
+        "confirm.request",
+        "download.progress",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+
+    "AssistantState": {
+      "type": "string",
+      "description": "Main loop: idle -> wake -> listening -> thinking -> speaking -> idle. muted and error can be entered from any state.",
+      "enum": ["idle", "wake", "listening", "thinking", "speaking", "muted", "error"]
+    },
+    "Language": {
+      "type": "string",
+      "enum": ["ru", "en"]
+    },
+    "Risk": {
+      "type": "string",
+      "description": "safe runs at once, confirm waits for a voice yes or a click, dangerous needs a click.",
+      "enum": ["safe", "confirm", "dangerous"]
+    },
+    "ToolSource": {
+      "type": "string",
+      "enum": ["builtin", "mcp", "skill"]
+    },
+    "EmptyParams": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "OkResult": {
+      "type": "object",
+      "properties": { "ok": { "type": "boolean" } },
+      "required": ["ok"],
+      "additionalProperties": false
+    },
+    "Settings": {
+      "type": "object",
+      "description": "The full user settings document. Its shape is defined by the pydantic model in core/solana_core/config/.",
+      "additionalProperties": true
+    },
+    "ToolInfo": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "risk": { "$ref": "#/$defs/Risk" },
+        "source": { "$ref": "#/$defs/ToolSource" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["name", "description", "risk", "source", "enabled"],
+      "additionalProperties": false
+    },
+    "McpServerConfig": {
+      "type": "object",
+      "description": "Same shape as one entry of mcpServers in Claude Desktop config. stdio servers use command/args/env, HTTP servers use url/headers.",
+      "properties": {
+        "command": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "url": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "McpServerStatus": {
+      "type": "string",
+      "enum": ["connected", "connecting", "disconnected", "error"]
+    },
+    "McpServerInfo": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "config": { "$ref": "#/$defs/McpServerConfig" },
+        "enabled": { "type": "boolean" },
+        "status": { "$ref": "#/$defs/McpServerStatus" },
+        "error": { "type": "string" },
+        "tools": { "type": "array", "items": { "$ref": "#/$defs/ToolInfo" } }
+      },
+      "required": ["name", "config", "enabled", "status", "tools"],
+      "additionalProperties": false
+    },
+    "SkillInfo": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "languages": { "type": "array", "items": { "$ref": "#/$defs/Language" } },
+        "builtin": { "type": "boolean" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "name", "description", "languages", "builtin", "enabled"],
+      "additionalProperties": false
+    },
+    "ModelKind": {
+      "type": "string",
+      "enum": ["wake", "vad", "stt", "tts", "llm", "embedding"]
+    },
+    "ModelInfo": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "$ref": "#/$defs/ModelKind" },
+        "name": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "installed": { "type": "boolean" }
+      },
+      "required": ["id", "kind", "name", "size_bytes", "installed"],
+      "additionalProperties": false
+    },
+
+    "PingResult": {
+      "type": "object",
+      "properties": {
+        "pong": { "const": true },
+        "version": { "type": "string", "description": "solana-core version" },
+        "protocol_version": { "type": "integer" },
+        "fake": { "type": "boolean", "description": "true when core runs with --fake" }
+      },
+      "required": ["pong", "version", "protocol_version", "fake"],
+      "additionalProperties": false
+    },
+    "PingRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/PingResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "StateGetRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/StateEvent" }
+      },
+      "required": ["params", "result"]
+    },
+    "SettingsResult": {
+      "type": "object",
+      "properties": { "settings": { "$ref": "#/$defs/Settings" } },
+      "required": ["settings"],
+      "additionalProperties": false
+    },
+    "SettingsGetRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/SettingsResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "SettingsSetParams": {
+      "type": "object",
+      "description": "Deep-merge patch applied to the current settings. Secrets (API keys) never go through settings; they are stored in the OS keyring.",
+      "properties": { "patch": { "$ref": "#/$defs/Settings" } },
+      "required": ["patch"],
+      "additionalProperties": false
+    },
+    "SettingsSetRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/SettingsSetParams" },
+        "result": { "$ref": "#/$defs/SettingsResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "ChatSendParams": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "language": { "$ref": "#/$defs/Language" }
+      },
+      "required": ["text"],
+      "additionalProperties": false
+    },
+    "ChatSendResult": {
+      "type": "object",
+      "description": "The answer itself streams as assistant.delta / assistant.done events with this turn_id.",
+      "properties": { "turn_id": { "type": "string" } },
+      "required": ["turn_id"],
+      "additionalProperties": false
+    },
+    "ChatSendRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/ChatSendParams" },
+        "result": { "$ref": "#/$defs/ChatSendResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "VoiceMuteParams": {
+      "type": "object",
+      "properties": { "muted": { "type": "boolean" } },
+      "required": ["muted"],
+      "additionalProperties": false
+    },
+    "VoiceMuteRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/VoiceMuteParams" },
+        "result": { "$ref": "#/$defs/VoiceMuteParams" }
+      },
+      "required": ["params", "result"]
+    },
+    "ConfirmReplyParams": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "approved": { "type": "boolean" },
+        "always": {
+          "type": "boolean",
+          "description": "Always allow this tool from now on. Ignored for dangerous tools."
+        }
+      },
+      "required": ["request_id", "approved"],
+      "additionalProperties": false
+    },
+    "ConfirmReplyRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/ConfirmReplyParams" },
+        "result": { "$ref": "#/$defs/OkResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "ToolsListResult": {
+      "type": "object",
+      "properties": { "tools": { "type": "array", "items": { "$ref": "#/$defs/ToolInfo" } } },
+      "required": ["tools"],
+      "additionalProperties": false
+    },
+    "ToolsListRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/ToolsListResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "ToolsSetEnabledParams": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["name", "enabled"],
+      "additionalProperties": false
+    },
+    "ToolsSetEnabledRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/ToolsSetEnabledParams" },
+        "result": { "$ref": "#/$defs/ToolInfo" }
+      },
+      "required": ["params", "result"]
+    },
+    "McpListResult": {
+      "type": "object",
+      "properties": {
+        "servers": { "type": "array", "items": { "$ref": "#/$defs/McpServerInfo" } }
+      },
+      "required": ["servers"],
+      "additionalProperties": false
+    },
+    "McpListRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/McpListResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "McpAddParams": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "config": { "$ref": "#/$defs/McpServerConfig" }
+      },
+      "required": ["name", "config"],
+      "additionalProperties": false
+    },
+    "McpAddRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/McpAddParams" },
+        "result": { "$ref": "#/$defs/McpServerInfo" }
+      },
+      "required": ["params", "result"]
+    },
+    "McpNameParams": {
+      "type": "object",
+      "properties": { "name": { "type": "string" } },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "McpRemoveRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/McpNameParams" },
+        "result": { "$ref": "#/$defs/OkResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "McpSetEnabledParams": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["name", "enabled"],
+      "additionalProperties": false
+    },
+    "McpSetEnabledRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/McpSetEnabledParams" },
+        "result": { "$ref": "#/$defs/McpServerInfo" }
+      },
+      "required": ["params", "result"]
+    },
+    "SkillsListResult": {
+      "type": "object",
+      "properties": { "skills": { "type": "array", "items": { "$ref": "#/$defs/SkillInfo" } } },
+      "required": ["skills"],
+      "additionalProperties": false
+    },
+    "SkillsListRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/SkillsListResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "SkillsInstallParams": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Local folder, path to a .zip file, or a git URL."
+        }
+      },
+      "required": ["source"],
+      "additionalProperties": false
+    },
+    "SkillsInstallRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/SkillsInstallParams" },
+        "result": { "$ref": "#/$defs/SkillInfo" }
+      },
+      "required": ["params", "result"]
+    },
+    "SkillIdParams": {
+      "type": "object",
+      "properties": { "id": { "type": "string" } },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "SkillsRemoveRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/SkillIdParams" },
+        "result": { "$ref": "#/$defs/OkResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "SkillsSetEnabledParams": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "enabled"],
+      "additionalProperties": false
+    },
+    "SkillsSetEnabledRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/SkillsSetEnabledParams" },
+        "result": { "$ref": "#/$defs/SkillInfo" }
+      },
+      "required": ["params", "result"]
+    },
+    "ModelsListResult": {
+      "type": "object",
+      "properties": { "models": { "type": "array", "items": { "$ref": "#/$defs/ModelInfo" } } },
+      "required": ["models"],
+      "additionalProperties": false
+    },
+    "ModelsListRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/EmptyParams" },
+        "result": { "$ref": "#/$defs/ModelsListResult" }
+      },
+      "required": ["params", "result"]
+    },
+    "ModelsDownloadParams": {
+      "type": "object",
+      "properties": { "model_id": { "type": "string" } },
+      "required": ["model_id"],
+      "additionalProperties": false
+    },
+    "ModelsDownloadResult": {
+      "type": "object",
+      "description": "Progress arrives as download.progress events with this download_id.",
+      "properties": { "download_id": { "type": "string" } },
+      "required": ["download_id"],
+      "additionalProperties": false
+    },
+    "ModelsDownloadRequest": {
+      "type": "object",
+      "properties": {
+        "params": { "$ref": "#/$defs/ModelsDownloadParams" },
+        "result": { "$ref": "#/$defs/ModelsDownloadResult" }
+      },
+      "required": ["params", "result"]
+    },
+
+    "StateEvent": {
+      "type": "object",
+      "properties": {
+        "state": { "$ref": "#/$defs/AssistantState" },
+        "previous": { "$ref": "#/$defs/AssistantState" },
+        "reason": { "type": "string", "description": "Short machine-readable cause, e.g. wake_word, hotkey, timeout." }
+      },
+      "required": ["state"],
+      "additionalProperties": false
+    },
+    "TranscriptEvent": {
+      "type": "object",
+      "description": "Used by both transcript.partial and transcript.final.",
+      "properties": {
+        "utterance_id": { "type": "string" },
+        "text": { "type": "string" },
+        "language": { "$ref": "#/$defs/Language" }
+      },
+      "required": ["utterance_id", "text"],
+      "additionalProperties": false
+    },
+    "AssistantDeltaEvent": {
+      "type": "object",
+      "properties": {
+        "turn_id": { "type": "string" },
+        "text": { "type": "string", "description": "Next chunk of the answer." }
+      },
+      "required": ["turn_id", "text"],
+      "additionalProperties": false
+    },
+    "AssistantDoneEvent": {
+      "type": "object",
+      "properties": {
+        "turn_id": { "type": "string" },
+        "text": { "type": "string", "description": "The full answer." },
+        "interrupted": { "type": "boolean" }
+      },
+      "required": ["turn_id", "text"],
+      "additionalProperties": false
+    },
+    "ToolStartedEvent": {
+      "type": "object",
+      "properties": {
+        "call_id": { "type": "string" },
+        "turn_id": { "type": "string" },
+        "tool": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["call_id", "tool", "arguments"],
+      "additionalProperties": false
+    },
+    "ToolFinishedEvent": {
+      "type": "object",
+      "properties": {
+        "call_id": { "type": "string" },
+        "tool": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "summary": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["call_id", "tool", "ok"],
+      "additionalProperties": false
+    },
+    "ConfirmRequestEvent": {
+      "type": "object",
+      "description": "Ask the user to approve a tool call. The app answers with confirm.reply.",
+      "properties": {
+        "request_id": { "type": "string" },
+        "tool": { "type": "string" },
+        "risk": { "$ref": "#/$defs/Risk" },
+        "title": { "type": "string", "description": "Human readable, in the user's language." },
+        "details": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true },
+        "voice_allowed": {
+          "type": "boolean",
+          "description": "false for dangerous tools: only a click can approve."
+        },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "required": ["request_id", "tool", "risk", "title", "arguments", "voice_allowed"],
+      "additionalProperties": false
+    },
+    "DownloadProgressEvent": {
+      "type": "object",
+      "properties": {
+        "download_id": { "type": "string" },
+        "model_id": { "type": "string" },
+        "downloaded_bytes": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "done": { "type": "boolean" },
+        "error": { "type": "string" }
+      },
+      "required": ["download_id", "model_id", "downloaded_bytes", "total_bytes", "done"],
+      "additionalProperties": false
+    },
+    "ErrorEvent": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "description": "Stable machine-readable code, e.g. mic_unavailable, llm_unreachable." },
+        "message": { "type": "string", "description": "Human readable, in the user's language." },
+        "recoverable": { "type": "boolean" }
+      },
+      "required": ["code", "message", "recoverable"],
+      "additionalProperties": false
+    }
+  }
+}
