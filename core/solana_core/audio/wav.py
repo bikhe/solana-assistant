@@ -14,9 +14,7 @@ from solana_core.audio.base import FRAME_BYTES, SAMPLE_RATE
 Pcm = NDArray[np.int16]
 
 
-def resample(
-    samples: NDArray[np.number[Any]], src_rate: int, dst_rate: int = SAMPLE_RATE
-) -> Pcm:
+def resample(samples: NDArray[np.number[Any]], src_rate: int, dst_rate: int = SAMPLE_RATE) -> Pcm:
     """Linear-interpolation resampling. Good enough for speech at 16 kHz."""
     if src_rate == dst_rate:
         return np.asarray(samples, dtype=np.float64).astype(np.int16)
