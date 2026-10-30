@@ -1,7 +1,8 @@
 //! Starts solana-core as a child process and learns its port and token.
 //!
 //! The core prints `SOLANA_CORE_READY {"port": .., "token": ".."}` to stdout once it listens.
-//! In debug builds the core runs from source through `uv run`; WP13 adds the bundled sidecar.
+//! In debug builds the core runs from source through `uv run`. Release builds run the sidecar
+//! that `core/packaging/build_sidecar.py` builds and the bundle installs next to the app.
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -50,14 +51,29 @@ fn core_command(token: &str) -> Command {
             .arg("solana-core");
         c
     } else {
-        // WP13 replaces this with the PyInstaller/Nuitka sidecar shipped in the bundle.
-        Command::new("solana-core")
+        Command::new(sidecar_path())
     };
     cmd.args(["--port", "0", "--token", token]);
     if fake_mode() {
         cmd.arg("--fake");
     }
+    // The sidecar is a console program: don't flash a console window on Windows.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd
+}
+
+/// Tauri installs `bundle.externalBin` next to the app executable, without the target triple.
+fn sidecar_path() -> PathBuf {
+    let name = format!("solana-core{}", std::env::consts::EXE_SUFFIX);
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 pub fn spawn(app: &AppHandle) -> std::io::Result<()> {
@@ -90,6 +106,10 @@ pub fn spawn(app: &AppHandle) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn is_running(app: &AppHandle) -> bool {
+    app.state::<CoreState>().child.lock().unwrap().is_some()
+}
+
 pub fn kill(app: &AppHandle) {
     if let Some(mut child) = app.state::<CoreState>().child.lock().unwrap().take() {
         // `uv run` on Windows does not pass the kill on to the Python child: kill the tree.
@@ -97,6 +117,20 @@ pub fn kill(app: &AppHandle) {
         let _ = Command::new("taskkill")
             .args(["/pid", &child.id().to_string(), "/t", "/f"])
             .status();
+        // The one-file sidecar runs the core in a child of its bootloader. SIGTERM is passed on
+        // to that child, SIGKILL is not, so ask politely first.
+        #[cfg(unix)]
+        {
+            let _ = Command::new("kill")
+                .args(["-TERM", &child.id().to_string()])
+                .status();
+            for _ in 0..30 {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
