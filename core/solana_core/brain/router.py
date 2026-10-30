@@ -8,6 +8,7 @@ provider or model needs no restart.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -118,6 +119,8 @@ class BrainRouter(LLMProvider):
         # One provider per side; rebuilt when its settings or key change.
         self._built: dict[bool, tuple[tuple[str, str, str | None, str | None], LLMProvider]] = {}
         self.last: LLMProvider | None = None  # provider that answered the last turn
+        self._closing: set[asyncio.Task[None]] = set()
+        self._build_errors: list[LLMError] = []
 
     @property
     def local(self) -> bool:  # type: ignore[override]
@@ -127,8 +130,22 @@ class BrainRouter(LLMProvider):
         spec = (provider, model, url, api_key(provider, self._secrets))
         built = self._built.get(local)
         if built is None or built[0] != spec:
+            if built is not None:
+                self._close(built[1])
             built = self._built[local] = (spec, self._factory(*spec, local))
         return built[1]
+
+    def _close(self, provider: LLMProvider) -> None:
+        """Release the HTTP pool of a provider replaced after a settings change."""
+        aclose = getattr(provider, "aclose", None)
+        if aclose is None:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(aclose())
+        except RuntimeError:  # no running loop: nothing is in flight either
+            return
+        self._closing.add(task)
+        task.add_done_callback(self._closing.discard)
 
     def cloud(self) -> LLMProvider:
         s = self._settings()
@@ -145,16 +162,27 @@ class BrainRouter(LLMProvider):
     async def candidates(self, messages: Sequence[Message]) -> list[LLMProvider]:
         """Providers to try for this turn, best first."""
         s = self._settings()
-        cloud, local = self.cloud(), self.local_provider()
         if s.mode == "local":
-            order = [local, cloud]
+            local_first = True
         elif s.mode == "cloud":
-            order = [cloud, local]
+            local_first = False
         else:
             last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
-            order = [local, cloud] if is_simple(last_user) else [cloud, local]
-        # A cloud provider without a key is skipped right away; local ones are just tried.
-        return [p for p in order if p.local or await p.available()]
+            local_first = is_simple(last_user)
+        out: list[LLMProvider] = []
+        self._build_errors = []
+        for build in (
+            (self.local_provider, self.cloud) if local_first else (self.cloud, self.local_provider)
+        ):
+            try:
+                provider = build()  # a broken setting on one side must not block the other
+            except LLMError as exc:
+                self._build_errors.append(exc)
+                continue
+            # A cloud provider without a key is skipped right away; local ones are just tried.
+            if provider.local or await provider.available():
+                out.append(provider)
+        return out
 
     async def available(self) -> bool:
         return bool(await self.candidates([]))
@@ -164,6 +192,8 @@ class BrainRouter(LLMProvider):
     ) -> AsyncIterator[LLMEvent]:
         candidates = await self.candidates(messages)
         if not candidates:
+            if self._build_errors:
+                raise self._build_errors[0]
             raise LLMError("no LLM provider is configured")
         for i, provider in enumerate(candidates):
             started = False

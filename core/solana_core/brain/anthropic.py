@@ -18,7 +18,14 @@ from solana_core.brain.base import (
     ToolSpec,
 )
 from solana_core.brain.errors import LLMError
-from solana_core.brain.http import DEFAULT_TIMEOUT, ToolNames, parse_arguments, post_sse
+from solana_core.brain.http import (
+    DEFAULT_TIMEOUT,
+    RETRYABLE_ERRORS,
+    ToolNames,
+    check_url,
+    parse_arguments,
+    post_sse,
+)
 
 API_VERSION = "2023-06-01"
 DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -90,46 +97,55 @@ class AnthropicProvider(LLMProvider):
             "content-type": "application/json",
         }
         url = f"{self.base_url}/v1/messages"
+        check_url(url, self.api_key)
         blocks: dict[int, dict[str, Any]] = {}
         stop: Any = "end"
         usage: dict[str, int] = {}
-        async for sse in post_sse(
-            self._client, url, headers, self.build_request(messages, tools, names)
-        ):
-            if sse.event == "ping":
-                continue
-            data = sse.json()
-            kind = data.get("type", sse.event)
-            if kind == "message_start":
-                usage.update(_ints(data.get("message", {}).get("usage", {})))
-            elif kind == "content_block_start":
-                block = dict(data["content_block"])
-                block["_json"] = ""
-                blocks[data["index"]] = block
-            elif kind == "content_block_delta":
-                delta = data["delta"]
-                if delta.get("type") == "text_delta" and delta.get("text"):
-                    yield TextDelta(delta["text"])
-                elif delta.get("type") == "input_json_delta":
-                    blocks[data["index"]]["_json"] += delta.get("partial_json", "")
-            elif kind == "content_block_stop":
-                block = blocks.pop(data["index"], {})
-                if block.get("type") == "tool_use":
-                    args = (
-                        parse_arguments(block["_json"])
-                        if block["_json"]
-                        else block.get("input", {})
+        finished = False
+        body = self.build_request(messages, tools, names)
+        try:
+            async for sse in post_sse(self._client, url, headers, body):
+                if sse.event == "ping":
+                    continue
+                data = sse.json()
+                kind = data.get("type", sse.event)
+                if kind == "message_start":
+                    usage.update(_ints(data.get("message", {}).get("usage", {})))
+                elif kind == "content_block_start":
+                    block = dict(data["content_block"])
+                    block["_json"] = ""
+                    blocks[data["index"]] = block
+                elif kind == "content_block_delta":
+                    delta = data["delta"]
+                    if delta.get("type") == "text_delta" and delta.get("text"):
+                        yield TextDelta(delta["text"])
+                    elif delta.get("type") == "input_json_delta":
+                        blocks[data["index"]]["_json"] += delta.get("partial_json", "")
+                elif kind == "content_block_stop":
+                    block = blocks.pop(data["index"], {})
+                    if block.get("type") == "tool_use":
+                        raw = block["_json"]
+                        args = parse_arguments(raw) if raw else block.get("input", {})
+                        yield ToolCallRequest(
+                            ToolCall(block["id"], names.ours(block["name"]), args)
+                        )
+                elif kind == "message_delta":
+                    reason = data.get("delta", {}).get("stop_reason")
+                    stop = _STOP_REASONS.get(reason or "", "end")
+                    usage.update(_ints(data.get("usage", {})))
+                elif kind == "error":
+                    error = data.get("error", {})
+                    raise LLMError(
+                        f"Anthropic: {error.get('message', 'unknown error')}",
+                        unreachable=error.get("type") in RETRYABLE_ERRORS,
                     )
-                    yield ToolCallRequest(ToolCall(block["id"], names.ours(block["name"]), args))
-            elif kind == "message_delta":
-                reason = data.get("delta", {}).get("stop_reason")
-                stop = _STOP_REASONS.get(reason or "", "end")
-                usage.update(_ints(data.get("usage", {})))
-            elif kind == "error":
-                error = data.get("error", {})
-                raise LLMError(f"Anthropic: {error.get('message', 'unknown error')}")
-            elif kind == "message_stop":
-                break
+                elif kind == "message_stop":
+                    finished = True
+                    break
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LLMError(f"Anthropic: malformed stream event ({exc!r})") from exc
+        if not finished:
+            raise LLMError("Anthropic: the answer was cut off")
         yield Done(stop, usage)
 
 

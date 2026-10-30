@@ -31,7 +31,7 @@ _FILLER = re.compile(
     r"\b(?:эй|солана|пожалуйста|please|hey|solana|ну|а|ка|давай|можешь|можно|"
     r"could you|can you)\b",
 )
-_PUNCT = re.compile(r"[^\w\s.:/-]+")
+_PUNCT = re.compile(r"[^\w\s.:/?=&%#-]+")  # keeps what URLs need
 _SPACES = re.compile(r"\s+")
 
 
@@ -39,7 +39,7 @@ def normalize(text: str) -> str:
     text = text.lower().replace("ё", "е").replace("-ка", "")
     text = _PUNCT.sub(" ", text)
     text = _FILLER.sub(" ", text)
-    return _SPACES.sub(" ", text).strip(" .")
+    return _SPACES.sub(" ", text).strip(" .?")
 
 
 _NUMBER_WORDS = {

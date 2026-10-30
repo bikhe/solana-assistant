@@ -7,6 +7,7 @@ sample data in --fake mode, so the app can be built against them already.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Coroutine
 from typing import Any
@@ -63,6 +64,8 @@ from solana_core.server.rpc import (
     not_implemented,
 )
 
+log = logging.getLogger(__name__)
+
 
 def build_dispatcher(core: Core) -> Dispatcher:
     rpc = Dispatcher()
@@ -94,11 +97,12 @@ def build_dispatcher(core: Core) -> Dispatcher:
     @rpc.method("settings.set")
     async def settings_set(params: SettingsSetParams) -> SettingsResult:
         try:
-            core.config.update(params.patch.model_dump())
+            settings = core.config.update(params.patch.model_dump())
         except ValidationError as exc:
             raise RpcError(
                 INVALID_PARAMS, "Invalid settings", exc.errors(include_url=False)
             ) from exc
+        core.tools.set_disabled(settings.tools.disabled)
         return settings_result()
 
     @rpc.method("voice.mute")
@@ -231,46 +235,59 @@ async def _chat_turn(core: Core, turn_id: str, text: str, language: Language) ->
     assert dialog is not None
     async with core.turn_lock:
         core.set_state("thinking", "chat")
-        async for event in dialog.turn(text, language=language, turn_id=turn_id):
-            if isinstance(event, TextDelta):
-                if core.state != "speaking":
-                    core.set_state("speaking")
-                core.bus.emit(
-                    "assistant.delta", AssistantDeltaEvent(turn_id=turn_id, text=event.text)
-                )
-            elif isinstance(event, ToolStarted):
-                core.bus.emit(
-                    "tool.started",
-                    ToolStartedEvent(
-                        call_id=event.call.id,
-                        turn_id=turn_id,
-                        tool=event.call.name,
-                        arguments=dict(event.call.arguments),
-                    ),
-                )
-            elif isinstance(event, ToolFinished):
-                result = event.result
-                core.bus.emit(
-                    "tool.finished",
-                    ToolFinishedEvent(
-                        call_id=event.call.id,
-                        tool=event.call.name,
-                        ok=result.ok,
-                        summary=result.content[:200] if result.ok else None,
-                        error=None if result.ok else result.content[:200],
-                    ),
-                )
-            elif isinstance(event, TurnDone):
-                if event.error:
+        answer, done = "", False
+        try:
+            async for event in dialog.turn(text, language=language, turn_id=turn_id):
+                if isinstance(event, TextDelta):
+                    if core.state != "speaking":
+                        core.set_state("speaking")
+                    answer += event.text
                     core.bus.emit(
-                        "error",
-                        ErrorEvent(code="llm_unreachable", message=event.text, recoverable=True),
+                        "assistant.delta", AssistantDeltaEvent(turn_id=turn_id, text=event.text)
                     )
+                elif isinstance(event, ToolStarted):
+                    core.bus.emit(
+                        "tool.started",
+                        ToolStartedEvent(
+                            call_id=event.call.id,
+                            turn_id=turn_id,
+                            tool=event.call.name,
+                            arguments=dict(event.call.arguments),
+                        ),
+                    )
+                elif isinstance(event, ToolFinished):
+                    result = event.result
+                    core.bus.emit(
+                        "tool.finished",
+                        ToolFinishedEvent(
+                            call_id=event.call.id,
+                            tool=event.call.name,
+                            ok=result.ok,
+                            summary=result.content[:200] if result.ok else None,
+                            error=None if result.ok else result.content[:200],
+                        ),
+                    )
+                elif isinstance(event, TurnDone):
+                    if event.error_code:
+                        core.bus.emit(
+                            "error",
+                            ErrorEvent(code=event.error_code, message=event.text, recoverable=True),
+                        )
+                    core.bus.emit(
+                        "assistant.done", AssistantDoneEvent(turn_id=turn_id, text=event.text)
+                    )
+                    done = True
+        except Exception:
+            log.exception("chat turn failed")
+        finally:
+            # Whatever happened (crash, cancel), the app must not wait forever.
+            if not done:
                 core.bus.emit(
-                    "assistant.done", AssistantDoneEvent(turn_id=turn_id, text=event.text)
+                    "assistant.done",
+                    AssistantDoneEvent(turn_id=turn_id, text=answer, interrupted=True),
                 )
-        if not core.muted:
-            core.set_state("idle")
+            if not core.muted:
+                core.set_state("idle")
 
 
 async def _fake_download(core: Core, catalog: FakeCatalog, download_id: str, model_id: str) -> None:

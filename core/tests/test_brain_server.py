@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from solana_core.brain.base import FakeLLM, TextDelta, ToolCall, ToolCallRequest
-from solana_core.config import ConfigStore
+from solana_core.config import ConfigStore, MemorySecretStore
 from solana_core.server.core import Core
 from solana_core.tools import ToolRegistry
 from solana_core.tools.base import FakeTool
@@ -97,3 +97,44 @@ def test_registry_keeps_user_choice_across_reconnects() -> None:
     assert "mcp.files.read" in reg and not reg.is_enabled("mcp.files.read")
     reg.register(PcTool("mcp.files.read"), replace=True)
     assert reg.disabled_names() == ["mcp.files.read"]
+
+
+async def test_settings_set_updates_disabled_tools(client: Client, core: Core) -> None:
+    await client.request("settings.set", {"patch": {"tools": {"disabled": ["fake.echo"]}}})
+    assert not core.tools.is_enabled("fake.echo")
+    await client.request("settings.set", {"patch": {"tools": {"disabled": []}}})
+    assert core.tools.is_enabled("fake.echo")
+
+
+def test_core_keeps_an_empty_registry(config: ConfigStore) -> None:
+    registry = ToolRegistry()
+    core = Core(config, MemorySecretStore(), tools=registry)
+    registry.register(FakeTool())
+    assert core.tools is registry and "fake.echo" in core.tools
+
+
+async def test_crashing_turn_still_finishes(client: Client, core: Core) -> None:
+    class Crash(FakeLLM):
+        async def stream(self, messages, tools=()):  # type: ignore[no-untyped-def]
+            raise RuntimeError("bug")
+            yield TextDelta("")  # pragma: no cover
+
+    core.llm = Crash()
+    await client.request("chat.send", {"text": "расскажи что-нибудь интересное"})
+    done = await client.next_event("assistant.done")
+    assert done["params"]["interrupted"] is True
+    assert core.state == "idle"
+
+
+async def test_llm_error_event_code(client: Client, core: Core) -> None:
+    from solana_core.brain.errors import LLMError
+
+    class Unauthorized(FakeLLM):
+        async def stream(self, messages, tools=()):  # type: ignore[no-untyped-def]
+            raise LLMError("HTTP 401: invalid x-api-key", status=401)
+            yield TextDelta("")  # pragma: no cover
+
+    core.llm = Unauthorized()
+    await client.request("chat.send", {"text": "расскажи что-нибудь интересное"})
+    error = await client.next_event("error")
+    assert error["params"]["code"] == "llm_error"

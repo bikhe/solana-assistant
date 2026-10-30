@@ -58,6 +58,10 @@ class ToolRegistry:
     def is_enabled(self, name: str) -> bool:
         return name in self._tools and name not in self._disabled
 
+    def set_disabled(self, names: Iterable[str]) -> None:
+        """Replace the whole disabled set, e.g. after ``tools.disabled`` changed in settings."""
+        self._disabled = set(names)
+
     def disabled_names(self) -> list[str]:
         """Everything the user disabled, registered or not; this is what settings store."""
         return sorted(self._disabled)

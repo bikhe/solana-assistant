@@ -30,6 +30,12 @@ from solana_core.brain.fast import parse
         ("Эй, Солана, запусти Телеграм", "pc.app_open", {"name": "телеграм"}),
         ("открой ютуб", "pc.url_open", {"url": "https://youtube.com"}),
         ("открой habr.com", "pc.url_open", {"url": "https://habr.com"}),
+        (
+            "открой ya.ru/search?text=погода",
+            "pc.url_open",
+            {"url": "https://ya.ru/search?text=погода"},
+        ),
+        ("громче?", "pc.volume_change", {"delta": 10}),
         ("закрой-ка блокнот", "pc.app_close", {"name": "блокнот"}),
         ("найди в интернете рецепт блинов", "pc.web_search", {"query": "рецепт блинов"}),
         ("загугли курс доллара", "pc.web_search", {"query": "курс доллара"}),

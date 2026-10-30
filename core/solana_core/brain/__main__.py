@@ -31,6 +31,7 @@ _DEMO_TOOLS: dict[str, tuple[str, dict[str, Any]]] = {
         {"action": {"type": "string", "enum": ["play_pause", "play", "pause", "next", "previous"]}},
     ),
     "pc.app_open": ("Открыть приложение по названию", {"name": {"type": "string"}}),
+    "pc.app_close": ("Закрыть приложение по названию", {"name": {"type": "string"}}),
     "pc.url_open": ("Открыть ссылку в браузере", {"url": {"type": "string"}}),
     "pc.web_search": ("Поиск в интернете", {"query": {"type": "string"}}),
 }
@@ -64,9 +65,9 @@ def main() -> None:
     if args.set_key:
         preset = PRESETS.get(args.set_key)
         if preset is None or preset.secret is None:
-            sys.exit(f"{args.set_key} does not use an API key")
-        secrets.set(preset.secret, getpass.getpass(f"{args.set_key} API key: "))
-        print("saved")
+            sys.exit(f"{args.set_key}: этому провайдеру ключ не нужен")
+        secrets.set(preset.secret, getpass.getpass(f"API-ключ {args.set_key}: "))
+        print("Ключ сохранён.")
 
     config = ConfigStore()
     overrides = {

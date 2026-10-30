@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +18,8 @@ from solana_core.brain.errors import LLMError
 DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
 # Worth retrying on another provider: overload, rate limit, server errors.
 _RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504, 529}
+# Upper bound for a whole answer: pings keep the read timeout alive forever otherwise.
+MAX_STREAM_S = 180.0
 _WIRE_NAME = re.compile(r"[^a-zA-Z0-9_-]")
 
 
@@ -45,7 +48,10 @@ async def post_sse(
                     unreachable=response.status_code in _RETRYABLE_STATUS,
                     status=response.status_code,
                 )
+            deadline = time.monotonic() + MAX_STREAM_S
             async for event in parse_sse(response.aiter_lines()):
+                if time.monotonic() > deadline:
+                    raise LLMError(f"no complete answer in {MAX_STREAM_S:.0f} s")
                 yield event
     except httpx.TransportError as exc:
         # Connect errors mean nothing was sent yet; read errors may cut a stream in half,
@@ -93,14 +99,39 @@ class ToolNames:
     """APIs allow only ``[a-zA-Z0-9_-]`` in tool names; ours use dots (``pc.volume_set``)."""
 
     def __init__(self, tools: Sequence[ToolSpec]) -> None:
-        self._to_ours = {self.wire(t.name): t.name for t in tools}
+        self._to_wire: dict[str, str] = {}
+        self._to_ours: dict[str, str] = {}
+        for tool in tools:
+            wire = base = self.base(tool.name)
+            n = 2
+            while wire in self._to_ours:  # "a.b" and "a/b" would collide
+                suffix = f"_{n}"
+                wire, n = base[: 64 - len(suffix)] + suffix, n + 1
+            self._to_wire[tool.name] = wire
+            self._to_ours[wire] = tool.name
 
     @staticmethod
-    def wire(name: str) -> str:
+    def base(name: str) -> str:
         return _WIRE_NAME.sub("_", name.replace(".", "__"))[:64]
+
+    def wire(self, name: str) -> str:
+        return self._to_wire.get(name) or self.base(name)
 
     def ours(self, wire_name: str) -> str:
         return self._to_ours.get(wire_name, wire_name)
+
+
+def check_url(url: str, key: str | None) -> None:
+    """Never send an API key in clear text over the network; loopback servers are fine."""
+    parsed = httpx.URL(url)
+    if key and parsed.scheme != "https" and parsed.host not in _LOOPBACK:
+        raise LLMError(f"refusing to send an API key over {parsed.scheme}:// to {parsed.host}")
+
+
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+# Provider error types inside an SSE stream that are worth retrying elsewhere.
+RETRYABLE_ERRORS = {"overloaded_error", "rate_limit_error", "api_error", "server_error"}
 
 
 def parse_arguments(raw: str) -> dict[str, Any]:

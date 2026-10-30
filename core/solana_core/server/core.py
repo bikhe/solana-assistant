@@ -29,7 +29,9 @@ class Core:
     ) -> None:
         self.config = config
         self.secrets = secrets
-        self.tools = tools or ToolRegistry(disabled=config.settings.tools.disabled)
+        if tools is None:
+            tools = ToolRegistry(disabled=config.settings.tools.disabled)
+        self.tools = tools
         self.llm = llm  # set by WP3; None means chat is not available yet
         self.fake = fake
         self.bus = EventBus()

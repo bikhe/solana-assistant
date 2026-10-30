@@ -93,7 +93,7 @@ async def test_recorded_claude_opens_browser() -> None:
 
 async def test_recorded_ollama_pauses_music() -> None:
     media = PcTool("pc.media")
-    replay = Replay("ollama_qwen3_tool.sse", "openai_text.sse")
+    replay = Replay("ollama_qwen3_tool.sse", "openai_pause_done.sse")
     llm = OpenAICompatProvider(
         "ollama", "http://127.0.0.1:11434/v1", "qwen3:8b", local=True, client=replay.client()
     )
@@ -101,7 +101,7 @@ async def test_recorded_ollama_pauses_music() -> None:
     events = await run(dialog, "поставь музыку на паузу, а то она мешает разговаривать")
     assert media.calls == [{"action": "pause"}]
     assert "Пользователь хочет" not in spoken(events)  # reasoning is never spoken
-    assert done(events).text == "Поставила громкость тридцать."
+    assert done(events).text == "Поставила на паузу."
 
 
 async def test_fast_command_skips_llm() -> None:
@@ -332,3 +332,67 @@ async def test_done_is_last_and_single() -> None:
     llm = FakeLLM([[TextDelta("Да."), Done()]])
     events = await run(Dialog(llm, ToolRegistry()), "ты здесь, Солана, ответь мне")
     assert sum(isinstance(e, TurnDone) for e in events) == 1
+
+
+async def test_tool_disabled_while_confirmation_pending() -> None:
+    close = PcTool("pc.app_close", risk="confirm")
+    reg = registry(close)
+
+    async def approve_after_disable(tool: Tool, call: ToolCall) -> bool:
+        reg.set_enabled("pc.app_close", False)  # user flips the switch while the card is open
+        return True
+
+    events = await run(Dialog(FakeLLM(), reg, approve=approve_after_disable), "закрой блокнот")
+    assert close.calls == []
+    finished = next(e for e in events if isinstance(e, ToolFinished))
+    assert not finished.result.ok
+
+
+async def test_error_after_tool_keeps_the_finished_step() -> None:
+    app_open = PcTool("pc.app_open")
+
+    class ToolThenFail(FakeLLM):
+        async def stream(self, messages, tools=()):  # type: ignore[no-untyped-def]
+            self.calls.append(list(messages))
+            if len(self.calls) == 1:
+                yield TextDelta("Открываю.")
+                yield ToolCallRequest(ToolCall("1", "pc.app_open", {"name": "браузер"}))
+                yield Done("tool_use")
+            else:
+                yield TextDelta("Откры")
+                raise LLMError("HTTP 500")
+
+    dialog = Dialog(ToolThenFail(), registry(app_open))
+    events = await run(dialog, "мне нужен браузер, открой его")
+    assert done(events).error_code == "llm_error"
+    assert done(events).text.startswith("Открываю. Откры")
+    roles = [m.role for m in dialog.history]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    assert dialog.history[1].tool_calls and dialog.history[2].tool_call_id == "1"
+    assert dialog.history[3].content.startswith("Откры")
+
+
+async def test_barge_in_on_fast_command_is_recorded() -> None:
+    started = asyncio.Event()
+
+    class SlowVolume(Tool):
+        name = "pc.volume_change"
+        description = "slow"
+
+        async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+            started.set()
+            await asyncio.sleep(10)
+            return ToolResult("ok")
+
+    dialog = Dialog(FakeLLM(), registry(SlowVolume()))
+
+    async def consume() -> None:
+        async for _ in dialog.turn("громче"):
+            pass
+
+    task = asyncio.create_task(consume())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert [m.content for m in dialog.history] == ["громче"]

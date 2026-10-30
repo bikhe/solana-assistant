@@ -20,7 +20,14 @@ from solana_core.brain.base import (
     ToolSpec,
 )
 from solana_core.brain.errors import LLMError
-from solana_core.brain.http import DEFAULT_TIMEOUT, ToolNames, parse_arguments, post_sse
+from solana_core.brain.http import (
+    DEFAULT_TIMEOUT,
+    RETRYABLE_ERRORS,
+    ToolNames,
+    check_url,
+    parse_arguments,
+    post_sse,
+)
 
 _FINISH_REASONS: dict[str, Any] = {
     "stop": "end",
@@ -84,7 +91,8 @@ class OpenAICompatProvider(LLMProvider):
         body: dict[str, Any] = {
             "model": self.model,
             "stream": True,
-            "max_tokens": self.max_tokens,
+            # OpenAI's newer models reject max_tokens; most other servers only know it.
+            "max_completion_tokens" if self.name == "openai" else "max_tokens": self.max_tokens,
             "messages": [_to_openai(m, names) for m in messages],
         }
         if tools:
@@ -112,35 +120,45 @@ class OpenAICompatProvider(LLMProvider):
         usage: dict[str, int] = {}
         think = ThinkFilter()
         url = f"{self.base_url}/chat/completions"
+        check_url(url, self.api_key)
         body = self.build_request(messages, tools, names)
-        async for sse in post_sse(self._client, url, self._headers(), body):
-            if sse.data.strip() == "[DONE]":
-                break
-            data = sse.json()
-            if "error" in data:
-                error = data["error"]
-                message = error.get("message") if isinstance(error, dict) else error
-                raise LLMError(f"{self.name}: {message}")
-            if isinstance(data.get("usage"), dict):
-                usage.update({k: v for k, v in data["usage"].items() if isinstance(v, int)})
-            for choice in data.get("choices") or []:
-                delta = choice.get("delta") or {}
-                if text := think.feed(delta.get("content") or ""):
-                    yield TextDelta(text)
-                for part in delta.get("tool_calls") or []:
-                    slot = calls.setdefault(
-                        part.get("index", len(calls)), {"id": "", "name": "", "args": ""}
-                    )
-                    slot["id"] = part.get("id") or slot["id"]
-                    function = part.get("function") or {}
-                    slot["name"] += function.get("name") or ""
-                    arguments = function.get("arguments")
-                    # Ollama may send the whole object instead of a JSON string.
-                    slot["args"] += (
-                        json.dumps(arguments) if isinstance(arguments, dict) else arguments or ""
-                    )
-                if reason := choice.get("finish_reason"):
-                    stop = _FINISH_REASONS.get(reason, "end")
+        finished = False
+        try:
+            async for sse in post_sse(self._client, url, self._headers(), body):
+                if sse.data.strip() == "[DONE]":
+                    finished = True
+                    break
+                data = sse.json()
+                if "error" in data:
+                    error = data["error"]
+                    message = error.get("message") if isinstance(error, dict) else error
+                    kind = error.get("type") if isinstance(error, dict) else None
+                    raise LLMError(f"{self.name}: {message}", unreachable=kind in RETRYABLE_ERRORS)
+                if isinstance(data.get("usage"), dict):
+                    usage.update({k: v for k, v in data["usage"].items() if isinstance(v, int)})
+                for choice in data.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    if text := think.feed(delta.get("content") or ""):
+                        yield TextDelta(text)
+                    for part in delta.get("tool_calls") or []:
+                        slot = calls.setdefault(
+                            part.get("index", len(calls)), {"id": "", "name": "", "args": ""}
+                        )
+                        slot["id"] = part.get("id") or slot["id"]
+                        function = part.get("function") or {}
+                        slot["name"] += function.get("name") or ""
+                        arguments = function.get("arguments")
+                        # Ollama may send the whole object instead of a JSON string.
+                        if isinstance(arguments, dict):
+                            arguments = json.dumps(arguments)
+                        slot["args"] += arguments or ""
+                    if reason := choice.get("finish_reason"):
+                        stop = _FINISH_REASONS.get(reason, "end")
+                        finished = True  # some local servers never send [DONE]
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise LLMError(f"{self.name}: malformed stream event ({exc!r})") from exc
+        if not finished:
+            raise LLMError(f"{self.name}: the answer was cut off")
         if text := think.flush():
             yield TextDelta(text)
         for index in sorted(calls):

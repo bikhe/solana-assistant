@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 
 import pytest
@@ -162,3 +163,36 @@ def test_broken_keyring_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
     assert api_key("anthropic", NoKeyring()) == "env-key"
+
+
+async def test_broken_unused_side_does_not_block_chat() -> None:
+    setup = Setup("local")
+    original = setup.factory
+
+    def factory(p: str, m: str, url: str | None, k: str | None, local: bool) -> LLMProvider:
+        if not local:
+            raise LLMError("openai-compatible: base URL is not set")
+        return original(p, m, url, k, local)
+
+    setup.router._factory = factory
+    assert await setup.ask("привет") == "local:qwen3:8b"
+
+
+async def test_replaced_provider_is_closed() -> None:
+    closed: list[str] = []
+
+    class Closable(Named):
+        async def aclose(self) -> None:
+            closed.append(self.name)
+
+    settings = [BrainSettings(mode="local")]
+    router = BrainRouter(
+        lambda: settings[0],
+        MemorySecretStore(),
+        factory=lambda p, m, url, k, local: Closable(f"{p}:{m}", local),
+    )
+    router.local_provider()
+    settings[0] = BrainSettings(mode="local", local_model="gemma3:4b")
+    router.local_provider()
+    await asyncio.sleep(0)
+    assert closed == ["ollama:qwen3:8b"]

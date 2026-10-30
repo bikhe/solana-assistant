@@ -208,6 +208,92 @@ async def test_local_available_probe() -> None:
 
 def test_tool_names_round_trip() -> None:
     names = ToolNames([APP_OPEN, ToolSpec("mcp.files/read", "", {})])
-    assert ToolNames.wire("mcp.files/read") == "mcp__files_read"
+    assert ToolNames.base("mcp.files/read") == "mcp__files_read"
+    assert names.wire("mcp.files/read") == "mcp__files_read"
     assert names.ours("mcp__files_read") == "mcp.files/read"
     assert names.ours("unknown") == "unknown"
+
+
+def _sse(*events: str) -> httpx.Response:
+    body = "".join(f"data: {e}\n\n" for e in events).encode()
+    return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+
+async def test_cut_off_stream_is_an_error() -> None:
+    start = '{"type":"message_start","message":{"usage":{}}}'
+    replay = Replay().then(_sse(start))
+    llm = AnthropicProvider("k", "m", client=replay.client())
+    with pytest.raises(LLMError, match="cut off"):
+        await collect(llm, [Message("user", "hi")], [])
+
+    replay = Replay().then(_sse('{"choices":[{"delta":{"content":"Жил"}}]}'))
+    oai = OpenAICompatProvider(
+        "ollama", "http://127.0.0.1:11434/v1", "q", local=True, client=replay.client()
+    )
+    with pytest.raises(LLMError, match="cut off"):
+        await collect(oai, [Message("user", "hi")], [])
+
+
+async def test_finish_reason_without_done_marker_is_fine() -> None:
+    replay = Replay().then(_sse('{"choices":[{"delta":{"content":"Да."},"finish_reason":"stop"}]}'))
+    oai = OpenAICompatProvider(
+        "lmstudio", "http://127.0.0.1:1234/v1", "q", local=True, client=replay.client()
+    )
+    events = await collect(oai, [Message("user", "hi")], [])
+    assert events == [TextDelta("Да."), Done("end", {})]
+
+
+async def test_overloaded_in_stream_allows_fallback() -> None:
+    error = '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'
+    replay = Replay().then(_sse(error))
+    llm = AnthropicProvider("k", "m", client=replay.client())
+    with pytest.raises(LLMError) as info:
+        await collect(llm, [Message("user", "hi")], [])
+    assert info.value.unreachable
+
+
+async def test_malformed_event_is_llm_error() -> None:
+    replay = Replay().then(_sse('{"type":"content_block_delta","index":0}'))
+    llm = AnthropicProvider("k", "m", client=replay.client())
+    with pytest.raises(LLMError, match="malformed"):
+        await collect(llm, [Message("user", "hi")], [])
+    replay = Replay().then(_sse("not json"))
+    oai = OpenAICompatProvider(
+        "ollama", "http://127.0.0.1:11434/v1", "q", local=True, client=replay.client()
+    )
+    with pytest.raises(LLMError, match="malformed"):
+        await collect(oai, [Message("user", "hi")], [])
+
+
+def test_openai_uses_max_completion_tokens() -> None:
+    names = ToolNames([])
+    openai = OpenAICompatProvider("openai", "https://api.openai.com/v1", "gpt-5", api_key="k")
+    assert "max_completion_tokens" in openai.build_request([], [], names)
+    ollama = OpenAICompatProvider("ollama", "http://127.0.0.1:11434/v1", "q", local=True)
+    assert "max_tokens" in ollama.build_request([], [], names)
+
+
+async def test_key_never_sent_over_plain_http() -> None:
+    replay = Replay()
+    llm = OpenAICompatProvider(
+        "openai-compatible", "http://example.com/v1", "m", api_key="secret", client=replay.client()
+    )
+    with pytest.raises(LLMError, match="refusing"):
+        await collect(llm, [Message("user", "hi")], [])
+    assert replay.requests == []
+    local = OpenAICompatProvider(
+        "llamacpp",
+        "http://127.0.0.1:8080/v1",
+        "m",
+        api_key="k",
+        local=True,
+        client=Replay().then(_sse('{"choices":[{"delta":{},"finish_reason":"stop"}]}')).client(),
+    )
+    assert (await collect(local, [Message("user", "hi")], []))[-1] == Done("end", {})
+
+
+def test_tool_name_collisions_get_unique_wire_names() -> None:
+    c, d = ToolSpec("x.y", "", {}), ToolSpec("x__y", "", {})
+    names = ToolNames([c, d])
+    assert names.wire("x.y") == "x__y" and names.wire("x__y") == "x__y_2"
+    assert names.ours("x__y") == "x.y" and names.ours("x__y_2") == "x__y"

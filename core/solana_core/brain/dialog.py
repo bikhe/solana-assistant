@@ -36,6 +36,7 @@ class TurnDone:
     text: str  # everything said in this turn
     fast: bool = False  # answered by a fast command, without the LLM
     error: str | None = None  # technical reason when the turn failed
+    error_code: str | None = None  # llm_unreachable or llm_error, for the app's error event
 
 
 DialogEvent = TextDelta | ToolStarted | ToolFinished | TurnDone
@@ -150,17 +151,21 @@ class Dialog:
         self, user: Message, match: fast.FastMatch, language: Language, turn_id: str | None
     ) -> AsyncIterator[DialogEvent]:
         call = ToolCall(f"fast_{uuid.uuid4().hex[:12]}", match.tool, match.arguments)
-        yield ToolStarted(call)
-        result = await self._execute(call, language, turn_id)
-        yield ToolFinished(call, result)
-        if result.ok:
-            answer = match.reply_for(language)
-        elif result.data.get("declined"):
-            answer = _t("declined", language)
-        else:
-            answer = result.content
-        yield TextDelta(answer)
-        self.history += [user, Message("assistant", answer)]
+        answer = ""
+        try:
+            yield ToolStarted(call)
+            result = await self._execute(call, language, turn_id)
+            if result.ok:
+                answer = match.reply_for(language)
+            elif result.data.get("declined"):
+                answer = _t("declined", language)
+            else:
+                answer = result.content
+            yield ToolFinished(call, result)
+            yield TextDelta(answer)
+        finally:
+            # Recorded even on barge-in: the action may already have happened.
+            self.history += [user, Message("assistant", answer)] if answer else [user]
         yield TurnDone(answer, fast=True)
 
     async def _llm_turn(
@@ -169,9 +174,11 @@ class Dialog:
         extra = self.prompt_extra() if self.prompt_extra else ""
         system = Message("system", system_prompt(language, extra=extra))
         added: list[Message] = [user]
+        complete = 1  # ``added[:complete]`` is safe to keep: no tool call without its result
         spoken: list[str] = []
+        text = ""  # the current step's text, counted as said as soon as it streams
         error: str | None = None
-        finished = False
+        error_code: str | None = None
         try:
             for _ in range(self.max_steps):
                 text, calls = "", []
@@ -186,34 +193,42 @@ class Dialog:
                 if text.strip():
                     spoken.append(text.strip())
                 added.append(Message("assistant", text, tuple(calls)))
+                text = ""
                 if not calls:
+                    complete = len(added)
                     break
                 for call in calls:
                     yield ToolStarted(call)
                     result = await self._execute(call, language, turn_id)
                     yield ToolFinished(call, result)
                     added.append(Message("tool", result.content, tool_call_id=call.id))
+                complete = len(added)
             else:
                 note = _t("too_many_steps", language)
                 yield TextDelta(note)
                 spoken.append(note)
                 added.append(Message("assistant", note))
-            finished = True
+                complete = len(added)
         except LLMError as exc:
             log.warning("LLM failed: %s", exc)
             error = str(exc)
+            error_code = "llm_unreachable" if exc.unreachable else "llm_error"
+            if text.strip():
+                spoken.append(text.strip())
+            text = ""
             note = _t("unavailable" if exc.unreachable else "failed", language)
             yield TextDelta(("\n" if spoken else "") + note)
             spoken.append(note)
-            # Keep only the question and what was already said; a half-done tool step
-            # would leave calls without results, which the APIs reject.
-            added = [user, Message("assistant", " ".join(spoken))]
-            finished = True
+            added = [*added[:complete], Message("assistant", " ".join(spoken))]
+            complete = len(added)
         finally:
-            if not finished:  # cancelled mid-turn (barge-in): same cleanup as above
-                added = [user, Message("assistant", " ".join(spoken))] if spoken else [user]
+            # On error or barge-in keep finished tool steps (they really happened) and what
+            # was said; drop a half-done step, whose calls would lack results.
+            tail = [m.content.strip() for m in added[complete:] if m.role == "assistant"]
+            tail = [t for t in [*tail, text.strip()] if t]
+            added = added[:complete] + ([Message("assistant", " ".join(tail))] if tail else [])
             self.history += added
-        yield TurnDone(" ".join(spoken), error=error)
+        yield TurnDone(" ".join(spoken), error=error, error_code=error_code)
 
     async def _execute(self, call: ToolCall, language: Language, turn_id: str | None) -> ToolResult:
         tool = self.tools.get(call.name)
@@ -221,6 +236,8 @@ class Dialog:
             return ToolResult(_t("tool_missing", language, name=call.name), ok=False)
         if not await self.approve(tool, call):
             return ToolResult(_t("tool_declined", language), ok=False, data={"declined": True})
+        if self.tools.get(call.name) is not tool:  # disabled or replaced while we asked
+            return ToolResult(_t("tool_missing", language, name=call.name), ok=False)
         try:
             return await tool.run(call.arguments, ToolContext(language, turn_id, call.id))
         except ToolError as exc:
