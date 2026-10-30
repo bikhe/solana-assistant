@@ -1,1 +1,1 @@
-"""Wake word detection («Эй, Солана»). Implemented by WP1."""
+"""Wake word detection («Эй, Солана»): openWakeWord-compatible runtime behind a VAD gate."""
