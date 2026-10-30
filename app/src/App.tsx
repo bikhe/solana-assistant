@@ -46,7 +46,7 @@ export function App({ client: given }: { client?: CoreClient }) {
   };
 
   return (
-    <main className="flex h-full flex-col bg-[radial-gradient(ellipse_at_top,_#1e1b4b_0%,_#020617_60%)]">
+    <main className="flex h-full flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,_#1e1b4b_0%,_#020617_60%)]">
       <header className="flex items-center justify-between px-6 py-4">
         <div className="flex items-center gap-2 text-lg font-semibold tracking-tight">
           Solana
@@ -65,7 +65,7 @@ export function App({ client: given }: { client?: CoreClient }) {
         </div>
       </header>
 
-      <section className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+      <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-6">
         <Orb state={view.state} />
         <p className="text-xl font-medium" data-testid="assistant-state">
           {stateLabels[view.state]}
