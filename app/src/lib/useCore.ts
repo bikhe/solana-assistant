@@ -1,77 +1,64 @@
-import { useEffect, useState } from "react";
-import type { AssistantState, ConfirmRequestEvent } from "@protocol/ipc";
-import type { ConnectionStatus, CoreClient, EventName } from "./rpc";
+import { useEffect, useReducer, useState } from "react";
+import { coreUrl, resolveCoreInfo } from "./connection";
+import { coreReducer, initialView, type CoreAction, type CoreView } from "./coreView";
+import { CoreClient } from "./rpc";
 
-export interface LogEntry {
-  id: number;
-  time: number;
-  event: EventName;
-  params: unknown;
+export type { CoreView, LogEntry } from "./coreView";
+
+export interface CoreHandle {
+  view: CoreView;
+  dispatch: (action: CoreAction) => void;
 }
-
-export interface CoreView {
-  status: ConnectionStatus;
-  state: AssistantState;
-  fake: boolean;
-  transcript: string;
-  answer: string;
-  confirm: ConfirmRequestEvent | null;
-  log: LogEntry[];
-}
-
-const LOG_LIMIT = 50;
-
-export const initialView: CoreView = {
-  status: "disconnected",
-  state: "idle",
-  fake: false,
-  transcript: "",
-  answer: "",
-  confirm: null,
-  log: [],
-};
 
 /** Subscribes to a CoreClient and keeps a render-friendly view of what the core reports. */
-export function useCore(client: CoreClient | null): CoreView {
-  const [view, setView] = useState<CoreView>(initialView);
+export function useCore(client: CoreClient | null): CoreHandle {
+  const [view, dispatch] = useReducer(coreReducer, initialView);
 
   useEffect(() => {
     if (!client) return;
-    let logId = 0;
-    const patch = (p: Partial<CoreView>) => setView((v) => ({ ...v, ...p }));
     const offs = [
       client.onStatus((status) => {
-        patch({ status });
+        dispatch({ type: "status", status });
         if (status === "connected") {
           client
             .request("ping")
-            .then((r) => patch({ fake: r.fake }))
+            .then((r) => dispatch({ type: "fake", fake: r.fake }))
             .catch(() => undefined);
         }
       }),
-      client.on("state", (e) =>
-        // A confirmation card only makes sense while the assistant waits on it.
-        setView((v) => ({
-          ...v,
-          state: e.state,
-          confirm: e.state === "thinking" ? v.confirm : null,
-        })),
-      ),
-      client.on("transcript.partial", (e) => patch({ transcript: e.text, answer: "" })),
-      client.on("transcript.final", (e) => patch({ transcript: e.text })),
-      client.on("assistant.delta", (e) => setView((v) => ({ ...v, answer: v.answer + e.text }))),
-      client.on("assistant.done", (e) => patch({ answer: e.text })),
-      client.on("confirm.request", (e) => patch({ confirm: e })),
-      client.onAny((event, params) =>
-        setView((v) => ({
-          ...v,
-          log: [{ id: logId++, time: Date.now(), event, params }, ...v.log].slice(0, LOG_LIMIT),
-        })),
-      ),
+      client.onAny((event, params) => dispatch({ type: "event", event, params, time: Date.now() })),
     ];
-    patch({ status: client.status });
+    dispatch({ type: "status", status: client.status });
     return () => offs.forEach((off) => off());
   }, [client]);
 
-  return view;
+  return { view, dispatch };
+}
+
+/** Finds the core (Tauri or ?port=&token=) and opens a connection, unless a client is given. */
+export function useCoreClient(given?: CoreClient): { client: CoreClient | null; noCore: boolean } {
+  const [client, setClient] = useState<CoreClient | null>(given ?? null);
+  const [noCore, setNoCore] = useState(false);
+
+  useEffect(() => {
+    if (given) return;
+    let created: CoreClient | null = null;
+    let cancelled = false;
+    resolveCoreInfo().then((info) => {
+      if (cancelled) return;
+      if (!info) {
+        setNoCore(true);
+        return;
+      }
+      created = new CoreClient(coreUrl(info));
+      created.connect();
+      setClient(created);
+    });
+    return () => {
+      cancelled = true;
+      created?.close();
+    };
+  }, [given]);
+
+  return { client, noCore };
 }
