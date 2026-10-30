@@ -46,11 +46,21 @@ PRESETS: dict[str, ProviderPreset] = {
 }
 
 
+_keyring_warned: list[bool] = []
+
+
 def api_key(provider: str, secrets: SecretStore) -> str | None:
     preset = PRESETS.get(provider)
     if preset is None or preset.secret is None:
         return None
-    return secrets.get(preset.secret) or (os.environ.get(preset.env) if preset.env else None)
+    try:
+        stored = secrets.get(preset.secret)
+    except Exception as exc:  # no keyring backend (headless Linux) must not break chat
+        if not _keyring_warned:
+            log.warning("keyring unavailable, using environment variables: %s", exc)
+            _keyring_warned.append(True)
+        stored = None
+    return stored or (os.environ.get(preset.env) if preset.env else None)
 
 
 def make_provider(
@@ -126,7 +136,11 @@ class BrainRouter(LLMProvider):
 
     def local_provider(self) -> LLMProvider:
         s = self._settings()
-        return self._provider(s.local_provider, s.local_model, s.local_base_url, True)
+        url: str | None = s.local_base_url
+        # Settings default to Ollama's URL; picking LM Studio should not require editing it.
+        if url == BrainSettings().local_base_url and s.local_provider != "ollama":
+            url = None
+        return self._provider(s.local_provider, s.local_model, url, True)
 
     async def candidates(self, messages: Sequence[Message]) -> list[LLMProvider]:
         """Providers to try for this turn, best first."""
