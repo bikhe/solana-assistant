@@ -45,7 +45,7 @@ def test_parse_now_playing() -> None:
 async def test_list_apps(tmp_path: Path) -> None:
     (tmp_path / "Safari.app").mkdir()
     (tmp_path / "Telegram.app").mkdir()
-    (tmp_path / "notes.txt").write_text("")
+    (tmp_path / "notes.txt").write_text("", encoding="utf-8")
     apps = await MacPcBackend(FakeRunner(), app_dirs=[tmp_path]).list_apps()
     assert [a.name for a in apps] == ["Safari", "Telegram"]
     assert apps[0].id.endswith("Safari.app")

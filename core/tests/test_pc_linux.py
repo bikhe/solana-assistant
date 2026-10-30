@@ -90,9 +90,9 @@ def test_parse_volume_outputs() -> None:
 async def test_list_and_open_apps(tmp_path: Path) -> None:
     apps_dir = tmp_path / "applications"
     (apps_dir / "kde").mkdir(parents=True)
-    (apps_dir / "firefox.desktop").write_text(FIREFOX)
+    (apps_dir / "firefox.desktop").write_text(FIREFOX, encoding="utf-8")
     (apps_dir / "kde" / "konsole.desktop").write_text(
-        "[Desktop Entry]\nName=Konsole\nExec=konsole\n"
+        "[Desktop Entry]\nName=Konsole\nExec=konsole\n", encoding="utf-8"
     )
     runner = FakeRunner()
     pc = backend(runner, app_dirs=[apps_dir])
