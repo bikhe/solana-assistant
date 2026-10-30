@@ -1,0 +1,77 @@
+name: Release
+
+# A tag such as v0.2.0 builds the installers on all three OSes and attaches them to a draft
+# GitHub release. Publishing the draft makes it the update that installed apps download.
+# Pull requests that touch packaging build the same installers as workflow artifacts, with
+# read-only access and no signing secrets.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/build-installers.yml
+      - core/packaging/**
+      - core/pyproject.toml
+      - core/uv.lock
+      - app/src-tauri/**
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    name: test build
+    if: github.ref_type != 'tag'
+    uses: ./.github/workflows/build-installers.yml
+
+  draft:
+    name: draft release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const tag = context.ref.replace("refs/tags/", "");
+            const { version } = JSON.parse(fs.readFileSync("app/src-tauri/tauri.conf.json", "utf8"));
+            if (tag !== `v${version}`) {
+              core.setFailed(`tag ${tag} does not match version ${version} in app/src-tauri/tauri.conf.json`);
+              return "";
+            }
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Solana ${version}`,
+              body: "Установщики ниже. Как установить: docs/RELEASING.md#установка",
+              draft: true,
+              prerelease: tag.includes("-"),
+            });
+            return data.id;
+
+  release:
+    name: release
+    needs: draft
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      release-id: ${{ needs.draft.outputs.id }}
+      tag: ${{ github.ref_name }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

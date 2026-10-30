@@ -32,6 +32,23 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Solana contributors",
+    "copyright": "MIT License",
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "category": "Productivity",
+    "shortDescription": "Голосовой ассистент для ПК",
+    "longDescription": "Solana: голосовой ассистент для ПК с локальным wake word, управлением компьютером, MCP и скиллами. Модели скачиваются при первом запуске.",
+    "windows": {
+      "nsis": {
+        "languages": ["Russian", "English"],
+        "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    }
   }
 }
