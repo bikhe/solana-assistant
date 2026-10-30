@@ -110,5 +110,6 @@ def _ram_gb_windows() -> float:
 
     status = MemoryStatus()
     status.dwLength = ctypes.sizeof(MemoryStatus)
-    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
+    windll = getattr(ctypes, "windll")  # noqa: B009 - only exists on Windows
+    windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
     return float(status.ullTotalPhys) / 1024**3
