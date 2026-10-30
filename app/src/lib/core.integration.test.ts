@@ -30,7 +30,15 @@ describe.skipIf(!hasUv)("solana-core --fake", () => {
   }, 120_000);
 
   afterAll(() => {
-    proc?.kill();
+    if (!proc?.pid) return;
+    proc.stdout?.destroy();
+    // `uv run` on Windows does not pass the kill on to the Python child, which would
+    // keep the pipe open and hang the test run, so kill the whole process tree.
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(proc.pid), "/t", "/f"], { stdio: "ignore" });
+    } else {
+      proc.kill();
+    }
   });
 
   it("delivers core events to the app client", async () => {
