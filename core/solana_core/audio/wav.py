@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import wave
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,7 +15,7 @@ Pcm = NDArray[np.int16]
 
 
 def resample(
-    samples: NDArray[np.floating] | Pcm, src_rate: int, dst_rate: int = SAMPLE_RATE
+    samples: NDArray[np.number[Any]], src_rate: int, dst_rate: int = SAMPLE_RATE
 ) -> Pcm:
     """Linear-interpolation resampling. Good enough for speech at 16 kHz."""
     if src_rate == dst_rate:
