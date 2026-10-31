@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28",
     "keyring>=25.6",
     "numpy>=2.1",
+    "onnxruntime>=1.20",
     "platformdirs>=4.3",
     "pydantic>=2.11",
     "sounddevice>=0.5",
@@ -62,7 +63,15 @@ plugins = ["pydantic.mypy"]
 files = ["solana_core", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["keyring.*", "sounddevice", "faster_whisper.*", "onnx_asr.*", "piper.*", "torch.*"]
+module = [
+    "keyring.*",
+    "onnxruntime.*",
+    "sounddevice.*",
+    "faster_whisper.*",
+    "onnx_asr.*",
+    "piper.*",
+    "torch.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

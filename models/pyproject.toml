@@ -1,0 +1,43 @@
+[project]
+name = "solana-wakeword"
+version = "0.1.0"
+description = "Training and evaluation of the «Эй, Солана» wake word model"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "solana-core",
+    "numpy>=2.0",
+    "onnx>=1.17",
+    # Dev-time only, never shipped with the app. piper-tts >= 1.3 is GPL-3.0.
+    "piper-tts>=1.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+solana-core = { path = "../core", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8.4", "ruff>=0.12", "mypy>=1.17"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001"]  # Russian text in strings is intended
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["wakeword", "tests"]
+mypy_path = "../core"
+
+[[tool.mypy.overrides]]
+module = ["onnx.*", "piper.*", "onnxruntime.*", "sounddevice.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
