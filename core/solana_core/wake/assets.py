@@ -100,7 +100,7 @@ def _download(asset: ModelAsset, dest: Path, progress: Progress | None) -> None:
                     progress(done, total)
     except OSError as e:
         tmp.unlink(missing_ok=True)
-        msg = f"Не удалось скачать {asset.file}: {e}"  # noqa: RUF001
+        msg = f"Не удалось скачать {asset.file}: {e}"
         raise ModelDownloadError(msg) from e
     if sha256_of(tmp) != asset.sha256:
         tmp.unlink(missing_ok=True)

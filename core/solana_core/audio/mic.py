@@ -39,7 +39,7 @@ def _sounddevice() -> Any:
         import sounddevice
     except OSError as e:  # PortAudio library missing
         raise AudioUnavailableError(
-            "Не найдена библиотека PortAudio. В Linux установите пакет libportaudio2."  # noqa: RUF001
+            "Не найдена библиотека PortAudio. В Linux установите пакет libportaudio2."
         ) from e
     return sounddevice
 
@@ -146,7 +146,7 @@ class SoundDeviceSource(AudioSource):
                     callback=self._callback,
                 )
             except sd.PortAudioError as e:
-                msg = f"Не удалось открыть микрофон: {e}"  # noqa: RUF001
+                msg = f"Не удалось открыть микрофон: {e}"
                 raise AudioUnavailableError(msg) from e
         stream.start()
         return stream
