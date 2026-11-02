@@ -1,5 +1,5 @@
-// Tools, MCP and skills tabs. MCP and skills are read-and-toggle only until WP7 and WP8.
-import type { McpServerInfo, Risk, SkillInfo, ToolInfo } from "@protocol/ipc";
+// Keys, tools and skills tabs. Skills are read-and-toggle only until WP8.
+import type { Risk, SkillInfo, ToolInfo } from "@protocol/ipc";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { KeyList } from "../../components/KeyList";
@@ -105,62 +105,6 @@ export function ToolsTab({ settings: s, update }: TabProps) {
               >
                 <X className="size-4" />
               </Button>
-            </Row>
-          ))
-        )}
-      </Section>
-    </>
-  );
-}
-
-const mcpTone = {
-  connected: "good",
-  connecting: "warn",
-  disconnected: "neutral",
-  error: "bad",
-} as const;
-
-export function McpTab() {
-  const { client } = useApp();
-  const { t } = useT();
-  const [servers, setServers] = useList<McpServerInfo>(() =>
-    client?.request("mcp.list").then((r) => r.servers),
-  );
-  const toggle = (name: string, enabled: boolean) =>
-    client
-      ?.request("mcp.set_enabled", { name, enabled })
-      .then((info) => setServers((servers ?? []).map((x) => (x.name === name ? info : x))))
-      .catch(() => undefined);
-  return (
-    <>
-      <Notice>{t("mcp.soon")}</Notice>
-      <Section>
-        {servers === null ? (
-          <Empty text={t("common.loading")} />
-        ) : servers.length === 0 ? (
-          <Empty text={t("mcp.none")} />
-        ) : (
-          servers.map((srv) => (
-            <Row
-              key={srv.name}
-              label={
-                <span className="flex items-center gap-2">
-                  {srv.name}
-                  <Badge tone={mcpTone[srv.status]}>{t(`mcp.status.${srv.status}`)}</Badge>
-                  {srv.tools.length > 0 && <Badge>{t("mcp.tools", { n: srv.tools.length })}</Badge>}
-                </span>
-              }
-              hint={
-                <code>
-                  {srv.config.url ?? [srv.config.command, ...(srv.config.args ?? [])].join(" ")}
-                </code>
-              }
-            >
-              <Toggle
-                label={srv.name}
-                checked={srv.enabled}
-                onChange={(on) => toggle(srv.name, on)}
-              />
             </Row>
           ))
         )}

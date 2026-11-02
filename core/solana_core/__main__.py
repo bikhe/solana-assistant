@@ -23,10 +23,13 @@ from solana_core.brain.base import FakeLLM
 from solana_core.brain.router import BrainRouter
 from solana_core.config import ConfigStore, KeyringSecretStore, MemorySecretStore
 from solana_core.fake.scenario import FakeScenario
+from solana_core.mcp import McpManager
+from solana_core.mcp.server import serve_stdio
 from solana_core.pc.tools import register_pc_tools
 from solana_core.server.core import Core
 from solana_core.server.handlers import build_dispatcher
 from solana_core.server.ws import CoreServer
+from solana_core.tools import ToolRegistry
 from solana_core.tools.base import FakeTool
 
 READY_PREFIX = "SOLANA_CORE_READY "
@@ -44,6 +47,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--fake", action="store_true", help="play scripted demo events")
     parser.add_argument(
         "--fake-speed", type=float, default=1.0, help="speed up the --fake scenario"
+    )
+    parser.add_argument(
+        "--mcp-server",
+        action="store_true",
+        help="serve Solana's PC tools to MCP clients (Claude Desktop, Claude Code) over stdio",
     )
     parser.add_argument("--config", type=Path, help="settings file (default: user config dir)")
     parser.add_argument("--log-level", default="INFO")
@@ -68,8 +76,13 @@ def build_core(args: argparse.Namespace) -> Core:
 
 async def run(args: argparse.Namespace) -> None:
     core = build_core(args)
-    server = CoreServer(core, build_dispatcher(core), args.token or secrets.token_urlsafe(24))
+    mcp = None if args.fake else McpManager(core.config, core.tools)
+    server = CoreServer(
+        core, build_dispatcher(core, mcp=mcp), args.token or secrets.token_urlsafe(24)
+    )
     await server.start(args.host, args.port)
+    if mcp is not None:
+        mcp.start()  # servers connect in the background and never delay READY
     ready = json.dumps({"port": server.port, "token": server.token})
     print(READY_PREFIX + ready, flush=True)
     logging.getLogger(__name__).info(
@@ -94,7 +107,16 @@ async def run(args: argparse.Namespace) -> None:
     finally:
         for task in tasks:
             task.cancel()
+        if mcp is not None:
+            await mcp.close()
         await server.close()
+
+
+async def run_mcp_server(args: argparse.Namespace) -> None:
+    config = ConfigStore(args.config)
+    tools = ToolRegistry(disabled=config.settings.tools.disabled)
+    register_pc_tools(tools)
+    await serve_stdio(tools)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -105,7 +127,7 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run(args))
+        asyncio.run(run_mcp_server(args) if args.mcp_server else run(args))
 
 
 if __name__ == "__main__":

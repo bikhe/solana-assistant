@@ -201,6 +201,125 @@ describe("settings", () => {
   });
 });
 
+describe("mcp tab", () => {
+  const fs = {
+    name: "filesystem",
+    config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "~"] },
+    enabled: true,
+    status: "connected",
+    tools: [
+      {
+        name: "mcp.filesystem.read_text_file",
+        description: "[MCP filesystem] Read",
+        risk: "confirm",
+        source: "mcp",
+        enabled: true,
+      },
+    ],
+  };
+  let servers: Record<string, unknown>[];
+  beforeEach(() => {
+    servers = [fs];
+    core.handlers["mcp.list"] = () => ({ servers });
+    core.handlers["mcp.add"] = (p) => {
+      const info = {
+        name: p.name,
+        config: p.config,
+        enabled: true,
+        status: "connecting",
+        tools: [],
+      };
+      servers = [...servers, info];
+      return info;
+    };
+    core.handlers["mcp.set_enabled"] = (p) => ({
+      ...fs,
+      enabled: p.enabled,
+      status: "disconnected",
+    });
+    core.handlers["mcp.remove"] = () => ({ ok: true });
+    core.handlers["tools.set_enabled"] = (p) => ({ ...fs.tools[0], enabled: p.enabled });
+  });
+
+  async function openTab() {
+    await show("settings");
+    fireEvent.click(screen.getByRole("tab", { name: /MCP/ }));
+    return await screen.findByTestId("mcp-filesystem");
+  }
+
+  it("shows servers with status and toggles their tools", async () => {
+    const row = await openTab();
+    expect(row).toHaveTextContent("подключён");
+    expect(row).toHaveTextContent("инструментов: 1");
+    fireEvent.click(within(row).getByRole("button", { name: "Показать инструменты" }));
+    const toggle = within(row).getByRole("switch", { name: "mcp.filesystem.read_text_file" });
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(core.sent("tools.set_enabled")).toEqual([
+        { name: "mcp.filesystem.read_text_file", enabled: false },
+      ]),
+    );
+    fireEvent.click(within(row).getByRole("switch", { name: "filesystem" }));
+    await waitFor(() =>
+      expect(core.sent("mcp.set_enabled")).toEqual([{ name: "filesystem", enabled: false }]),
+    );
+  });
+
+  it("adds a ready-made server in one click", async () => {
+    await openTab();
+    expect(screen.getByRole("button", { name: "Добавить: Файлы" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Добавить: DeepWiki" }));
+    await waitFor(() =>
+      expect(core.sent("mcp.add")).toEqual([
+        { name: "deepwiki", config: { url: "https://mcp.deepwiki.com/mcp" } },
+      ]),
+    );
+    expect(await screen.findByTestId("mcp-deepwiki")).toHaveTextContent("подключение");
+  });
+
+  it("adds a custom server with a suggested name", async () => {
+    await openTab();
+    const input = screen.getByLabelText("Команда запуска или URL");
+    fireEvent.change(input, {
+      target: { value: "uvx mcp-server-time --local-timezone Europe/Moscow" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(core.sent("mcp.add")).toEqual([
+        {
+          name: "time",
+          config: {
+            command: "uvx",
+            args: ["mcp-server-time", "--local-timezone", "Europe/Moscow"],
+          },
+        },
+      ]),
+    );
+  });
+
+  it("imports pasted JSON and skips servers that exist", async () => {
+    await openTab();
+    fireEvent.change(screen.getByLabelText("Конфиг mcpServers в JSON"), {
+      target: {
+        value: JSON.stringify({
+          mcpServers: {
+            filesystem: { command: "npx", args: ["x"] },
+            memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] },
+          },
+        }),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Импортировать JSON" }));
+    expect(await screen.findByText("Добавлены: memory. Уже были: filesystem.")).toBeInTheDocument();
+    expect(core.sent("mcp.add")).toEqual([
+      {
+        name: "memory",
+        config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] },
+      },
+    ]);
+  });
+});
+
 describe("wizard", () => {
   it("walks through the steps and passes the wake word check", async () => {
     core.settings.general = { language: "ru", autostart: false, first_run_done: false };

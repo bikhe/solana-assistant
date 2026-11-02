@@ -1,4 +1,5 @@
 mod core;
+mod mcp;
 mod tray;
 mod updater;
 mod windows;
@@ -34,6 +35,7 @@ pub fn run() {
             windows::show_window,
             windows::hide_window,
             tray::update_tray,
+            mcp::claude_desktop_config,
         ])
         .setup(|app| {
             if let Err(err) = core::spawn(app.handle()) {
