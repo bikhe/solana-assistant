@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Solana listens for “Hey Solana” and your commands.</string>
+  <string>Solana слушает микрофон, чтобы услышать «Эй, Солана» и вашу команду. Solana listens for its wake word and your commands.</string>
 </dict>
 </plist>

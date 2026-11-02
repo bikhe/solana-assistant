@@ -1,12 +1,17 @@
 mod core;
 mod tray;
+mod updater;
 mod windows;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let context = tauri::generate_context!();
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    if updater::enabled(context.config()) {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
 
     #[cfg(desktop)]
     {
@@ -36,6 +41,9 @@ pub fn run() {
             }
             tray::create(app.handle())?;
             windows::place_overlay(app.handle());
+            if updater::enabled(app.config()) {
+                updater::check_in_background(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -47,7 +55,7 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the Tauri app")
         .run(|app, event| {
             if let RunEvent::Exit = event {

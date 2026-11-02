@@ -31,7 +31,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - run: uv run mypy packaging
       - run: uv run pytest -q
+      # Catches dependencies that break the one-file build (missing hidden imports, data files).
+      - name: Build and smoke-test the sidecar
+        run: uv run python packaging/build_sidecar.py --smoke
 
   app:
     name: app (${{ matrix.os }})
