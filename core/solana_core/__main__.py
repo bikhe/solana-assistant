@@ -45,6 +45,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--fake-speed", type=float, default=1.0, help="speed up the --fake scenario"
     )
+    parser.add_argument(
+        "--no-voice", action="store_true", help="text chat only, do not open the microphone"
+    )
     parser.add_argument("--config", type=Path, help="settings file (default: user config dir)")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--version", action="version", version=f"solana-core {__version__}")
@@ -89,6 +92,10 @@ async def run(args: argparse.Namespace) -> None:
     tasks: list[asyncio.Task[object]] = [asyncio.create_task(stop.wait())]
     if args.fake:
         tasks.append(asyncio.create_task(FakeScenario(core, args.fake_speed).run()))
+    elif not args.no_voice:
+        from solana_core.pipeline.factory import run_voice
+
+        tasks.append(asyncio.create_task(run_voice(core)))
     try:
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
