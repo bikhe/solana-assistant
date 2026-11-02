@@ -587,12 +587,16 @@ class VoicePipeline:
     def _set_mode(self, mode: Mode) -> None:
         if mode is self.mode:
             return
-        self.mode = mode
-        if mode in (Mode.IDLE, Mode.RESPONDING, Mode.RECOGNIZING):
-            self._reset_detectors()
+        previous, self.mode = self.mode, mode
+        if mode is Mode.LISTENING:
+            return
+        # While answering the wake detector keeps running for barge-in; resetting it when
+        # the answer ends would lose a wake word the user has already started saying.
+        wake_was_fed = previous is not Mode.LISTENING and self.config.barge_in
+        self._reset_detectors(wake=not wake_was_fed)
 
-    def _reset_detectors(self) -> None:
-        if self.wake is not None:
+    def _reset_detectors(self, *, wake: bool = True) -> None:
+        if wake and self.wake is not None:
             self.wake.reset()
         self.vad.reset()
         self._stop_listener.reset()

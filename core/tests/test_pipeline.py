@@ -444,3 +444,12 @@ async def test_push_to_talk_starts_listening_without_wake_word(tmp_path: Path) -
 
     assert run.state_reasons()[0] == ("wake", "hotkey")
     assert [p["text"] for p in run.named("transcript.final")] == ["какая погода"]
+
+
+async def test_wake_word_said_as_the_answer_ends_is_heard(tmp_path: Path) -> None:
+    # The answer (0.52 s) ends in the middle of the next wake word: the detector has been
+    # listening for barge-in, so the end of the turn must not make it forget the start.
+    script = Script().wake().say(WEATHER).pause(1.3).wake().pause(0.1).say(TIME).pause(2.5)
+    run = await play(make_run(tmp_path, script, turns=[long_answer(4), [TextDelta("Пять.")]]))
+
+    assert [p["text"] for p in run.named("transcript.final")] == ["какая погода", "который час"]
