@@ -20,6 +20,7 @@ from pathlib import Path
 
 from solana_core import __version__
 from solana_core.brain.base import FakeLLM
+from solana_core.brain.router import BrainRouter
 from solana_core.config import ConfigStore, KeyringSecretStore, MemorySecretStore
 from solana_core.fake.scenario import FakeScenario
 from solana_core.server.core import Core
@@ -51,7 +52,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_core(args: argparse.Namespace) -> Core:
     if not args.fake:
-        return Core(ConfigStore(args.config), KeyringSecretStore())
+        config, secrets_store = ConfigStore(args.config), KeyringSecretStore()
+        llm = BrainRouter(lambda: config.settings.brain, secrets_store)
+        return Core(config, secrets_store, llm=llm)
     # Fake mode never touches the real settings file or keyring.
     config_path = args.config or Path(tempfile.gettempdir()) / "solana-fake-config.toml"
     core = Core(ConfigStore(config_path), MemorySecretStore(), llm=FakeLLM(), fake=True)
