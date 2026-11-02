@@ -116,3 +116,9 @@ export async function syncAutostart(enabled: boolean): Promise<void> {
   if ((await autostartEnabled()) === enabled) return;
   await (enabled ? enableAutostart() : disableAutostart());
 }
+
+/** Text of Claude Desktop's config file for the MCP import; null outside Tauri or if absent. */
+export async function readClaudeDesktopConfig(): Promise<string | null> {
+  if (!inTauri()) return null;
+  return (await invoke<string | null>("claude_desktop_config")) ?? null;
+}
