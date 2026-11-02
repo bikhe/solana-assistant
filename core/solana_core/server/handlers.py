@@ -18,6 +18,7 @@ from solana_core import __version__
 from solana_core.brain.base import TextDelta
 from solana_core.brain.dialog import ToolFinished, ToolStarted, TurnDone
 from solana_core.fake.catalog import FakeCatalog
+from solana_core.models import ModelError, ModelManager
 from solana_core.protocol import PROTOCOL_VERSION, Language
 from solana_core.protocol.generated import (
     AssistantDeltaEvent,
@@ -67,9 +68,10 @@ from solana_core.server.rpc import (
 log = logging.getLogger(__name__)
 
 
-def build_dispatcher(core: Core) -> Dispatcher:
+def build_dispatcher(core: Core, models: ModelManager | None = None) -> Dispatcher:
     rpc = Dispatcher()
     catalog = FakeCatalog() if core.fake else None
+    models = None if core.fake else models or ModelManager()
     background: set[asyncio.Task[None]] = set()
 
     def spawn(coro: Coroutine[Any, Any, None]) -> None:
@@ -213,10 +215,22 @@ def build_dispatcher(core: Core) -> Dispatcher:
     # Models (WP2)
     @rpc.method("models.list")
     async def models_list(_: EmptyParams) -> ModelsListResult:
+        if models is not None:
+            return ModelsListResult(models=models.infos())
         return ModelsListResult(models=list(catalog.models.values()) if catalog else [])
 
     @rpc.method("models.download")
     async def models_download(params: ModelsDownloadParams) -> ModelsDownloadResult:
+        if models is not None:
+            try:
+                download_id, task = await models.start_download(
+                    params.model_id, lambda event: core.bus.emit("download.progress", event)
+                )
+            except ModelError as exc:
+                raise RpcError(NOT_FOUND, str(exc)) from exc
+            background.add(task)
+            task.add_done_callback(background.discard)
+            return ModelsDownloadResult(download_id=download_id)
         if catalog is None:
             raise not_implemented("models.download")
         model = catalog.models.get(params.model_id)
