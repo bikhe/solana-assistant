@@ -243,3 +243,11 @@ async def test_volume_changes_do_not_overlap() -> None:
     pc.volume = 50
     await asyncio.gather(*(call(pc, "pc.volume_change", delta=10) for _ in range(3)))
     assert pc.volume == 80
+
+
+def test_real_core_registers_pc_tools(tmp_path: Path) -> None:
+    from solana_core.__main__ import build_core, parse_args
+
+    core = build_core(parse_args(["--config", str(tmp_path / "config.toml")]))
+    assert core.tools.get("pc.volume_set") is not None
+    assert core.tools.get("pc.app_open") is not None
