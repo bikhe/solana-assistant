@@ -120,7 +120,15 @@ CATALOG: dict[str, ModelSpec] = {
             "tts",
             "Silero TTS v4 (русский)",
             "silero",
-            (ModelFile("https://models.silero.ai/models/tts/ru/v4_ru.pt", "model.pt", 40 * _MB),),
+            (
+                ModelFile(
+                    "https://models.silero.ai/models/tts/ru/v4_ru.pt",
+                    "model.pt",
+                    40_107_184,
+                    # The server reports no hash; torch.package loading runs code, so pin it.
+                    "896ab96347d5bd781ab97959d4fd6885620e5aab52405d3445626eb7c1414b00",
+                ),
+            ),
             ("ru",),
             # Weights only, downloaded by the user at runtime and never bundled.
             "CC BY-NC-SA 4.0",
