@@ -18,6 +18,9 @@ from solana_core import __version__
 from solana_core.brain.base import TextDelta
 from solana_core.brain.dialog import ToolFinished, ToolStarted, TurnDone
 from solana_core.fake.catalog import FakeCatalog
+from solana_core.mcp import McpError, McpManager, McpNotFound
+from solana_core.mcp.config import McpConfigError
+from solana_core.mcp.fake import fake_connector, seed_demo
 from solana_core.models import ModelError, ModelManager
 from solana_core.protocol import PROTOCOL_VERSION, Language
 from solana_core.protocol.generated import (
@@ -68,7 +71,9 @@ from solana_core.server.rpc import (
 log = logging.getLogger(__name__)
 
 
-def build_dispatcher(core: Core, models: ModelManager | None = None) -> Dispatcher:
+def build_dispatcher(
+    core: Core, models: ModelManager | None = None, mcp: McpManager | None = None
+) -> Dispatcher:
     rpc = Dispatcher()
     catalog = FakeCatalog() if core.fake else None
     models = None if core.fake else models or ModelManager()
@@ -105,6 +110,8 @@ def build_dispatcher(core: Core, models: ModelManager | None = None) -> Dispatch
                 INVALID_PARAMS, "Invalid settings", exc.errors(include_url=False)
             ) from exc
         core.tools.set_disabled(settings.tools.disabled)
+        if mcp is not None:
+            mcp.sync()  # mcp.servers may have changed
         return settings_result()
 
     @rpc.method("voice.mute")
@@ -142,38 +149,39 @@ def build_dispatcher(core: Core, models: ModelManager | None = None) -> Dispatch
         return core.tools.info(params.name)
 
     # MCP (WP7)
+    if mcp is None and core.fake:
+        seed_demo(core.config)
+        mcp = McpManager(core.config, core.tools, fake_connector())
+
+    def mcp_manager() -> McpManager:
+        if mcp is None:
+            raise not_implemented("mcp")
+        mcp.start()  # idempotent; the real core starts it at launch
+        return mcp
+
     @rpc.method("mcp.list")
     async def mcp_list(_: EmptyParams) -> McpListResult:
-        return McpListResult(servers=list(catalog.mcp.values()) if catalog else [])
+        return McpListResult(servers=mcp_manager().infos())
 
     @rpc.method("mcp.add")
     async def mcp_add(params: McpAddParams) -> McpServerInfo:
-        if catalog is None:
-            raise not_implemented("mcp.add")
-        if params.name in catalog.mcp:
-            raise RpcError(CONFLICT, f"MCP server already exists: {params.name}")
-        server = McpServerInfo(
-            name=params.name, config=params.config, enabled=True, status="connecting", tools=[]
-        )
-        catalog.mcp[params.name] = server
-        return server
+        try:
+            return mcp_manager().add(params.name, params.config)
+        except McpConfigError as exc:
+            raise RpcError(INVALID_PARAMS, str(exc)) from exc
+        except McpError as exc:
+            raise RpcError(CONFLICT, str(exc)) from exc
 
     @rpc.method("mcp.remove")
     async def mcp_remove(params: McpNameParams) -> OkResult:
-        if catalog is None:
-            raise not_implemented("mcp.remove")
-        return OkResult(ok=catalog.mcp.pop(params.name, None) is not None)
+        return OkResult(ok=mcp_manager().remove(params.name))
 
     @rpc.method("mcp.set_enabled")
     async def mcp_set_enabled(params: McpSetEnabledParams) -> McpServerInfo:
-        if catalog is None:
-            raise not_implemented("mcp.set_enabled")
-        server = catalog.mcp.get(params.name)
-        if server is None:
-            raise RpcError(NOT_FOUND, f"Unknown MCP server: {params.name}")
-        server.enabled = params.enabled
-        server.status = "connected" if params.enabled else "disconnected"
-        return server
+        try:
+            return mcp_manager().set_enabled(params.name, params.enabled)
+        except McpNotFound as exc:
+            raise RpcError(NOT_FOUND, str(exc)) from exc
 
     # Skills (WP8)
     @rpc.method("skills.list")

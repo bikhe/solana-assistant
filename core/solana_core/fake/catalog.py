@@ -1,44 +1,13 @@
-"""Sample MCP servers, skills and models shown in --fake mode."""
+"""Sample skills and models shown in --fake mode. MCP has its own demo in ``mcp/fake.py``."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from solana_core.protocol.generated import (
-    McpServerConfig,
-    McpServerInfo,
     ModelInfo,
     SkillInfo,
-    ToolInfo,
 )
-
-
-def _mcp_servers() -> dict[str, McpServerInfo]:
-    fs = McpServerInfo(
-        name="filesystem",
-        config=McpServerConfig(
-            command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "~"]
-        ),
-        enabled=True,
-        status="connected",
-        tools=[
-            ToolInfo(
-                name="filesystem.read_file",
-                description="Прочитать файл",
-                risk="confirm",
-                source="mcp",
-                enabled=True,
-            )
-        ],
-    )
-    ha = McpServerInfo(
-        name="home-assistant",
-        config=McpServerConfig(url="http://homeassistant.local:8123/mcp_server/sse"),
-        enabled=False,
-        status="disconnected",
-        tools=[],
-    )
-    return {fs.name: fs, ha.name: ha}
 
 
 def _skills() -> dict[str, SkillInfo]:
@@ -95,6 +64,5 @@ def _models() -> dict[str, ModelInfo]:
 
 @dataclass
 class FakeCatalog:
-    mcp: dict[str, McpServerInfo] = field(default_factory=_mcp_servers)
     skills: dict[str, SkillInfo] = field(default_factory=_skills)
     models: dict[str, ModelInfo] = field(default_factory=_models)

@@ -103,7 +103,7 @@ async def test_tools_list_and_toggle(client: Client) -> None:
 
 async def test_fake_catalog(client: Client) -> None:
     servers = (await client.request("mcp.list"))["result"]["servers"]
-    assert {s["name"] for s in servers} == {"filesystem", "home-assistant"}
+    assert {s["name"] for s in servers} >= {"filesystem", "home-assistant"}
     skills = (await client.request("skills.list"))["result"]["skills"]
     assert skills
     models = (await client.request("models.list"))["result"]["models"]
