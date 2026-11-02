@@ -1,0 +1,4 @@
+# Generated data, trained models and personal recordings stay local.
+work/
+*.npz
+*.wav
