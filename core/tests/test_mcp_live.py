@@ -35,15 +35,21 @@ async def test_filesystem_server(tmp_path: Path) -> None:
     entry = McpServerEntry(
         command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", str(tmp_path)]
     )
-    async with sdk_connector("filesystem", entry) as conn:
-        names = {t.name for t in await conn.list_tools()}
-        assert {"list_directory", "read_text_file"} <= names
-        listing = await conn.call_tool("list_directory", {"path": str(tmp_path)}, 60)
-        assert listing.ok and "список покупок.txt" in listing.content
-        text = await conn.call_tool(
-            "read_text_file", {"path": str(tmp_path / "список покупок.txt")}, 60
-        )
-        assert "молоко" in text.content
+    log = tmp_path / "stderr.log"
+    try:
+        with log.open("w", encoding="utf-8") as errlog:
+            async with sdk_connector("filesystem", entry, errlog=errlog) as conn:
+                names = {t.name for t in await conn.list_tools()}
+                assert {"list_directory", "read_text_file"} <= names
+                listing = await conn.call_tool("list_directory", {"path": str(tmp_path)}, 60)
+                assert listing.ok and "список покупок.txt" in listing.content
+                text = await conn.call_tool(
+                    "read_text_file", {"path": str(tmp_path / "список покупок.txt")}, 60
+                )
+                assert "молоко" in text.content
+    except BaseException:
+        print("server stderr:\n" + log.read_text(encoding="utf-8", errors="replace"))
+        raise
 
 
 @pytest.mark.parametrize(

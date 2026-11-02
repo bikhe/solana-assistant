@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TextIO
 
 from solana_core import __version__
 from solana_core.config.models import McpServerEntry
@@ -204,10 +204,15 @@ def to_result(result: Any) -> ToolResult:
     return ToolResult("\n".join(parts) or "Готово", ok=not result.is_error, data=data)
 
 
-def transport_for(entry: McpServerEntry) -> Any:
+# The first ``npx -y`` / ``uvx`` start downloads the server, which takes a while on Windows.
+CONNECT_TIMEOUT_S = 180.0
+
+
+def transport_for(entry: McpServerEntry, errlog: TextIO | None = None) -> Any:
     """What ``mcp.Client`` connects to: stdio parameters, Streamable HTTP or legacy SSE."""
     from mcp import StdioServerParameters
     from mcp.client.sse import sse_client
+    from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
     from mcp.shared._httpx_utils import create_mcp_http_client
 
@@ -218,26 +223,30 @@ def transport_for(entry: McpServerEntry) -> Any:
         http = create_mcp_http_client(headers=headers)
         return streamable_http_client(entry.url, http_client=http)
     assert entry.command
-    return StdioServerParameters(
+    params = StdioServerParameters(
         command=entry.command,
         args=expand_args(entry.args),
         # The full environment, so servers find node, npx and uvx on the user's PATH.
         env={**os.environ, **entry.env},
     )
+    return stdio_client(params, errlog) if errlog else params
 
 
 @contextlib.asynccontextmanager
-async def sdk_connector(name: str, entry: McpServerEntry) -> AsyncIterator[McpConnection]:
+async def sdk_connector(
+    name: str, entry: McpServerEntry, *, errlog: TextIO | None = None
+) -> AsyncIterator[McpConnection]:
+    """``errlog`` receives a stdio server's stderr (default: ours)."""
     from mcp import Client, types
 
     conn = SdkConnection()
     client = Client(
-        transport_for(entry),
+        transport_for(entry, errlog),
         message_handler=conn.on_message,
         client_info=types.Implementation(name="solana", version=__version__),
     )
     async with contextlib.AsyncExitStack() as stack:
-        async with asyncio.timeout(60):  # a server that never answers the handshake
+        async with asyncio.timeout(CONNECT_TIMEOUT_S):
             await stack.enter_async_context(client)
         conn.client = client
         yield conn

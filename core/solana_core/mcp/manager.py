@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -149,7 +150,7 @@ class McpManager:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self._set(srv, "error", describe_error(exc))
+                self._set(srv, "error", describe_error(exc, srv.entry.command))
                 log.warning("MCP server %s: %s", srv.name, srv.error)
             finally:
                 self._tools.unregister_prefix(prefix)
@@ -226,13 +227,15 @@ class McpManager:
                 await self._tick.wait()
 
 
-def describe_error(exc: BaseException) -> str:
+def describe_error(exc: BaseException, command: str | None = None) -> str:
     """A short, human-readable reason, digging through anyio exception groups."""
     while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
         exc = exc.exceptions[0]
     if isinstance(exc, FileNotFoundError):
-        missing = exc.filename or str(exc)
-        hint = _INSTALL_HINTS.get(str(missing).rsplit("/", 1)[-1].lower().removesuffix(".cmd"))
+        # Windows leaves ``filename`` empty when the program is not on PATH.
+        missing = str(exc.filename or command or exc)
+        name = re.split(r"[\\/]", missing)[-1].lower().removesuffix(".cmd").removesuffix(".exe")
+        hint = _INSTALL_HINTS.get(name)
         return f"Команда не найдена: {missing}." + (f" {hint}" if hint else "")
     if isinstance(exc, TimeoutError):
         return "Сервер не ответил вовремя"
