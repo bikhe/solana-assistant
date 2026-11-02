@@ -19,6 +19,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-autostart": "^2.7.0",
+    "@tauri-apps/plugin-global-shortcut": "^2.4.1",
+    "lucide-react": "^1.65.0",
+    "motion": "^14.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
